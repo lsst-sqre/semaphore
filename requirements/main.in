@@ -1,0 +1,25 @@
+# Editable runtime dependencies (equivalent to install_requires)
+# Add direct runtime dependencies here, as well as implicit dependencies
+# with constrained versions.
+#
+# After editing, update requirements/main.txt by running:
+#     make update-deps
+
+# These dependencies are for FastAPI including some optional features.
+fastapi
+aiofiles
+fastapi-sqlalchemy
+gunicorn
+python-multipart
+starlette
+uvicorn[standard]
+
+# Other dependencies.
+click
+httpx
+safir>=2.0
+structlog
+
+# Temporary to avoid a conflict with requirements/dev.txt due to the requests
+# dependency on idna, which is capped at 2.10.
+idna<=2.10

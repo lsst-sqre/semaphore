@@ -1,0 +1,24 @@
+# Editable development dependencies
+# Add direct development, test, and documentation dependencies here, as well
+# as implicit dev dependencies with constrained versions.
+#
+# After editing, update requirements/dev.txt by running:
+#     make update-deps
+
+-c main.txt
+
+# Testing and linting
+asgi-lifespan
+mypy
+pytest
+pytest-asyncio
+pytest-cov
+pytest-httpx
+pytest-xdist[psutil]
+types-PyYAML
+
+# Documentation
+documenteer
+lsst-sphinx-bootstrap-theme<0.3
+sphinx-automodapi
+sphinx-click
