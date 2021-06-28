@@ -18,6 +18,7 @@ uvicorn[standard]
 click
 httpx
 safir>=2.0
+strawberry-graphql
 structlog
 
 # Temporary to avoid a conflict with requirements/dev.txt due to the requests
