@@ -3,15 +3,21 @@
 from fastapi import APIRouter, Depends
 from safir.dependencies.logger import logger_dependency
 from safir.metadata import get_metadata
+from strawberry.asgi import GraphQL
 from structlog.stdlib import BoundLogger
 
 from semaphore.config import config
+from semaphore.graphql.schema import graphql_schema
 from semaphore.models import Index
 
 __all__ = ["get_index", "external_router"]
 
 external_router = APIRouter()
 """FastAPI router for all external handlers."""
+
+
+# Add the Strawberry graphql app
+external_router.add_route("/graphql", GraphQL(graphql_schema))
 
 
 @external_router.get(
