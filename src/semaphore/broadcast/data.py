@@ -5,10 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import arrow
+
 if TYPE_CHECKING:
     from typing import Optional
 
-__all__ = ["BroadcastMessage"]
+__all__ = ["BroadcastMessage", "OneTimeBroadcastMessage"]
 
 
 @dataclass
@@ -30,3 +32,19 @@ class BroadcastMessage:
     def active(self) -> bool:
         """Whether the message should be served to clients for display."""
         return True
+
+
+@dataclass
+class OneTimeBroadcastMessage(BroadcastMessage):
+    """A broadcast that is scheduled to display for a single time window."""
+
+    defer: arrow.Arrow
+    """Time when the message begins to be displayed."""
+
+    expire: arrow.Arrow
+    """Time when the message begins to be considered expired."""
+
+    @property
+    def active(self) -> bool:
+        """Whether the message should be served to clients for display."""
+        return arrow.utcnow().is_between(self.defer, self.expire, bounds="[)")
