@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -16,9 +17,187 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BroadcastMessage",
-    "OneTimeBroadcastMessage",
-    "RepeatingBroadcastMessage",
+    "Scheduler",
 ]
+
+
+class Scheduler(ABC):
+    """A scheduler for messages."""
+
+    @abstractmethod
+    def is_active(self) -> bool:
+        """Tests if the scheduled event is active."""
+        raise NotImplementedError()
+
+    @abstractmethod
+    def has_future_events(self) -> bool:
+        """Tests if the schedule includes a future event (not including the
+        current event).
+        """
+        raise NotImplementedError()
+
+    def is_stale(self) -> bool:
+        """True, if the event is neither active or in the future."""
+        return not (self.is_active() | self.has_future_events())
+
+
+class PermaScheduler(Scheduler):
+    """A scheduler that is always active."""
+
+    def is_active(self) -> bool:
+        return True
+
+    def has_future_events(self) -> bool:
+        return False
+
+
+class OneTimeScheduler(Scheduler):
+    """A scheduler for a single, fixed, time window.
+
+    Parameters
+    ----------
+    start : `arrow.Arrow`
+        A start date as an arrow object.
+    end : `arrow.Arrow`
+        An end date as an arrow object.
+    """
+
+    def __init__(self, start: arrow.Arrow, end: arrow.Arrow) -> None:
+        self.start = start
+        self.end = end
+
+    @classmethod
+    def from_ttl(
+        cls, start: arrow.Arrow, ttl: datetime.timedelta
+    ) -> OneTimeScheduler:
+        """Create a OneTimeScheduler given a known start date and a TTL.
+
+        Parameters
+        ----------
+        start : `arrow.Arrow`
+            A start date as an arrow object.
+        ttl : `datetime.timedela`
+            The duration of the event.
+
+        Returns
+        -------
+        `OneTimeScheduler`
+            The scheduler.
+        """
+        end = start.shift(seconds=ttl.total_seconds())
+        return cls(start, end)
+
+    def is_active(self) -> bool:
+        return arrow.utcnow().is_between(self.start, self.end, bounds="[)")
+
+    def has_future_events(self) -> bool:
+        if self.start > arrow.utcnow():
+            return True
+        else:
+            return False
+
+
+class RepeatingScheduler(Scheduler):
+    """A schedule based on repeating rule sets (RFC 5546).
+
+    Parameters
+    ----------
+    rruleset : `dateutil.rrule.rruleset`
+        A repeating ruleset from the dateutil package. Rulesets can contain
+        both repeats, one-time dates, one-time exclusions, and so one. The
+        rruleset **must** have a UTC timezone. Time zones are not validated
+        by the constructor.
+    ttl : `datetime.timedela`
+        The duration of the event.
+    """
+
+    def __init__(
+        self, rruleset: dateutil.rrule.rruleset, ttl: datetime.timedelta
+    ) -> None:
+        self.rruleset = rruleset
+        self.ttl = ttl
+
+        # Get the next start date from now (but rewinding by the ttl in case
+        # the message is active **right now**.
+        start_datetime = rruleset.after(
+            arrow.utcnow().shift(seconds=-ttl.total_seconds()).datetime,
+            inc=True,
+        )
+        if start_datetime is None:
+            # For consistency with the constructors of schedulers, like
+            # OneTimeScheduler, try to build the scheduler with an already-old
+            # start.
+            start_datetime = rruleset.before(
+                arrow.utcnow().shift(seconds=-ttl.total_seconds()).datetime,
+                inc=True,
+            )
+            if start_datetime is None:
+                # Could this rruleset ever be scheduled?
+                raise ValueError(f"Cannot schedule rruleset: {rruleset!r}")
+        self._start = arrow.get(start_datetime)
+
+    @property
+    def ttl_seconds(self) -> float:
+        """The TTL, in seconds."""
+        return self.ttl.total_seconds()
+
+    @property
+    def _end(self) -> arrow.Arrow:
+        """The end time of the current event."""
+        return self._start.shift(seconds=self.ttl_seconds)
+
+    def is_active(self) -> bool:
+        self._refresh()
+        return arrow.utcnow().is_between(self._start, self._end, bounds="[)")
+
+    def has_future_events(self) -> bool:
+        now = arrow.utcnow()
+        if now < self._start:
+            # Next event is already scheduled
+            return True
+        elif self.is_active():
+            # Currently active, determine if there will be a future event
+            try:
+                self._propose(self._start.shift(seconds=1))
+            except ValueError:
+                return False
+            return True
+        else:
+            if self._end < now:
+                # Running is_active() above already refreshed the start/end
+                # dates, so if _end is in the past, there will never be a
+                # future event
+                return False
+            else:
+                return True
+
+    def _refresh(self) -> None:
+        if self._end < arrow.utcnow():
+            # The last message occurence expired, so let's calculate the next.
+            try:
+                candidate_start, candidate_end = self._propose(self._start)
+            except ValueError:
+                return None  # no future event
+            while candidate_end < arrow.utcnow():
+                # Keep iterating in case windows overlap
+                try:
+                    candidate_start, candidate_end = self._propose(
+                        candidate_start
+                    )
+                except ValueError:
+                    return None  # no future event
+            # Set next start date
+            self._start = candidate_start
+
+    def _propose(self, after: arrow.Arrow) -> Tuple[arrow.Arrow, arrow.Arrow]:
+        """Propose a new start/end time after the given time."""
+        candidate_start = self.rruleset.after(after, inc=False)
+        if candidate_start is None:
+            raise ValueError
+        else:
+            candidate_start = arrow.get(candidate_start)
+        candidate_end = candidate_start.shift(seconds=self.ttl_seconds)
+        return (candidate_start, candidate_end)
 
 
 @dataclass
@@ -36,116 +215,24 @@ class BroadcastMessage:
     body_md: Optional[str]
     """The body content, as markdown."""
 
-    @property
-    def active(self) -> bool:
-        """Whether the message should be served to clients for display."""
-        return True
+    scheduler: Scheduler
+    """The broadcast scheduler.
 
+    Can be one of:
 
-@dataclass
-class OneTimeBroadcastMessage(BroadcastMessage):
-    """A broadcast that is scheduled to display for a single time window."""
-
-    defer: arrow.Arrow
-    """Time when the message begins to be displayed."""
-
-    expire: arrow.Arrow
-    """Time when the message begins to be considered expired."""
-
-    @property
-    def active(self) -> bool:
-        """Whether the message should be served to clients for display."""
-        return arrow.utcnow().is_between(self.defer, self.expire, bounds="[)")
-
-
-@dataclass
-class RepeatingBroadcastMessage(OneTimeBroadcastMessage):
-    """A broadcast message that repeats according to an RFC 5546 recurence
-    rule schedule.
-
-    Note
-    ----
-    The `defer` and `expire` attributes reflect either the current or the next
-    periods when the message can be displayed. These dates are refreshed
-    automatically when polling the `active` property.
-    """
-
-    rruleset: dateutil.rrule.rruleset
-    """A recurring rule set."""
-
-    ttl: datetime.timedelta
-    """The length of time the message is displayed for after each cron
-    event.
+    - `PermaScheduler`
+    - `OneTimeScheduler`
+    - `RepeatingScheduler`
     """
 
     @property
-    def ttl_seconds(self) -> float:
-        return self.ttl.total_seconds()
-
-    @property
     def active(self) -> bool:
         """Whether the message should be served to clients for display."""
-        if self.expire < arrow.utcnow():
-            # The last message occurence expired, so let's calculate the next.
-            try:
-                candidate_defer, candidate_expire = self._propose(self.defer)
-            except ValueError:
-                return False  # no future event
-            while candidate_expire < arrow.utcnow():
-                # Keep iterating in case windows overlap
-                try:
-                    candidate_defer, candidate_expire = self._propose(
-                        candidate_defer
-                    )
-                except ValueError:
-                    return False  # no future event
-            # Set next defer and expire dates
-            self.defer = candidate_defer
-            self.expire = candidate_expire
-        return super().active
+        return self.scheduler.is_active()
 
-    def _propose(self, after: arrow.Arrow) -> Tuple[arrow.Arrow, arrow.Arrow]:
-        """Propose a new defer/expire time after the given time"""
-        candidate_defer = self.rruleset.after(after, inc=False)
-        if candidate_defer is None:
-            raise ValueError
-        else:
-            candidate_defer = arrow.get(candidate_defer)
-        candidate_expire = candidate_defer.shift(seconds=self.ttl_seconds)
-        return (candidate_defer, candidate_expire)
-
-    @classmethod
-    def from_rruleset(
-        cls,
-        *,
-        rruleset: dateutil.rrule.rruleset,
-        ttl: datetime.timedelta,
-        summary_md: str,
-        body_md: Optional[str],
-        source_path: str,
-    ) -> RepeatingBroadcastMessage:
-        """Create a RepeatingBroadcastMessage from a recurring rule set
-        and a TTL duration for each message event.
+    @property
+    def stale(self) -> bool:
+        """Wether the message is neither being currently displayable now
+        or ever in the future.
         """
-        # Get the next defer date from now (but rewinding by the ttl in case
-        # the message is active **right now**.
-        defer = rruleset.after(
-            arrow.utcnow().shift(seconds=-ttl.total_seconds()).datetime,
-            inc=True,
-        )
-        if defer is None:
-            raise ValueError(
-                "No future events can be schedule with this rruleset"
-            )
-        else:
-            defer = arrow.get(defer)
-        expire = defer.shift(seconds=ttl.total_seconds())
-        return cls(
-            rruleset=rruleset,
-            ttl=ttl,
-            defer=defer,
-            expire=expire,
-            summary_md=summary_md,
-            body_md=body_md,
-            source_path=source_path,
-        )
+        return self.scheduler.is_stale()
