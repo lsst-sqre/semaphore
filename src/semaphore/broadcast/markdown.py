@@ -4,12 +4,15 @@ front matter.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import yaml
 from markdown_it import MarkdownIt
+from mdformat.renderer import MDRenderer
 from mdit_py_plugins.front_matter import front_matter_plugin
 from pydantic import BaseModel, validator
+
+from .data import BroadcastMessage, PermaScheduler
 
 if TYPE_CHECKING:
 
@@ -34,11 +37,16 @@ class BroadcastMarkdown:
     text : `str`
         The content of the markdown message (including YAML-formatted
         front-matter).
+    source_path : `str`
+        A string that identifies the message, which is typically the POSIX path
+        of the markdown within the host GitHub repository.
     """
 
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, source_path: str) -> None:
         self._text = text
-        self._md_tokens = md.parse(text)
+        self.source_path = source_path
+        self._md_env: Dict[Any, Any] = {}
+        self._md_tokens = md.parse(text, self._md_env)
         self._metadata = self._parse_metadata()
 
     def _parse_metadata(self) -> BroadcastMarkdownFrontMatter:
@@ -63,6 +71,32 @@ class BroadcastMarkdown:
     def text(self) -> str:
         """The full text of the markdown message (including front-matter)."""
         return self._text
+
+    @property
+    def body(self) -> Optional[str]:
+        """The text of the markdown body or `None` if the message doesn't have
+        body content.
+        """
+        body_tokens = [t for t in self._md_tokens if t.type != "front_matter"]
+        if len(body_tokens) == 0:
+            return None
+        else:
+            return MDRenderer().render(body_tokens, md.options, self._md_env)
+
+    def to_broadcast(self) -> BroadcastMessage:
+        """Export a BroadcastMessage from the markdown content.
+
+        Returns
+        -------
+        `semaphore.broadcast.data.BroadcastMessage`
+            The broadcast message.
+        """
+        return BroadcastMessage(
+            source_path=self.source_path,
+            summary_md=self.metadata.summary,
+            body_md=self.body,
+            scheduler=PermaScheduler(),
+        )
 
 
 class BroadcastMarkdownFrontMatter(BaseModel):
