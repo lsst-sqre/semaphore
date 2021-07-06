@@ -63,8 +63,8 @@ class OneTimeScheduler(Scheduler):
     """
 
     def __init__(self, start: arrow.Arrow, end: arrow.Arrow) -> None:
-        self.start = start
-        self.end = end
+        self._start = start
+        self._end = end
 
     @classmethod
     def from_ttl(
@@ -86,6 +86,15 @@ class OneTimeScheduler(Scheduler):
         """
         end = start.shift(seconds=ttl.total_seconds())
         return cls(start, end)
+
+    @property
+    def start(self) -> arrow.Arrow:
+        """The start date."""
+        return self._start
+
+    @property
+    def end(self) -> arrow.Arrow:
+        return self._end
 
     def is_active(self) -> bool:
         return arrow.utcnow().is_between(self.start, self.end, bounds="[)")

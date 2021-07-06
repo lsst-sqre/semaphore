@@ -4,19 +4,33 @@ front matter.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+import datetime
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Union,
+)
 
+import arrow
+import dateutil
+import dateutil.parser
 import yaml
 from markdown_it import MarkdownIt
 from mdformat.renderer import MDRenderer
 from mdit_py_plugins.front_matter import front_matter_plugin
 from pydantic import BaseModel, validator
 
-from .data import BroadcastMessage, PermaScheduler
+from .data import BroadcastMessage, OneTimeScheduler, PermaScheduler
 
 if TYPE_CHECKING:
-
     from markdown_it.token import Token
+
+    from .data import Scheduler
 
 __all__ = ["BroadcastMarkdown", "BroadcastMarkdownFrontMatter"]
 
@@ -95,8 +109,55 @@ class BroadcastMarkdown:
             source_path=self.source_path,
             summary_md=self.metadata.summary,
             body_md=self.body,
-            scheduler=PermaScheduler(),
+            scheduler=self._make_scheduler(),
         )
+
+    def _make_scheduler(self) -> Scheduler:
+        if self.metadata.defer is not None:
+            if self.metadata.expire is not None:
+                return OneTimeScheduler(
+                    self.metadata.defer, self.metadata.expire
+                )
+            else:
+                raise NotImplementedError("Implement TTL")
+        else:
+            return PermaScheduler()
+
+
+class FuzzyArrow(arrow.Arrow):
+    """A Pydantic custom type that has flexible parsing of datetime fields
+    and generates arrow datetimes.
+    """
+
+    @classmethod
+    def __get_validators__(cls) -> Iterator[Callable[[Any], arrow.Arrow]]:
+        # one or more validators may be yielded which will be called in the
+        # order to validate the input, each validator will receive as an input
+        # the value returned from the previous validator
+        yield cls.validate
+
+    @classmethod
+    def validate(cls, v: Any) -> arrow.Arrow:
+        if isinstance(v, datetime.date):
+            # Pydantic pre-parses YYYY-MM-DD into a datetime.date
+            dt = datetime.datetime.combine(v, datetime.time())
+        elif isinstance(v, datetime.datetime):
+            # Pydantic pre-parses into a datetime
+            dt = v
+        elif isinstance(v, str):
+            try:
+                dt = dateutil.parser.parse(v, fuzzy=True, yearfirst=True)
+            except (ValueError, OverflowError):
+                raise ValueError("Could not parse date")
+        else:
+            raise TypeError("Not a string")
+
+        if dt.tzinfo:
+            # Parsed date includes a timezone.
+            return arrow.get(dt)
+        else:
+            # naive datetime, so default to UTC
+            return arrow.get(dt, dateutil.tz.UTC)
 
 
 class BroadcastMarkdownFrontMatter(BaseModel):
@@ -111,6 +172,12 @@ class BroadcastMarkdownFrontMatter(BaseModel):
     """The list of applicable environments. None implies that the broadcast
     is applicable to all environments.
     """
+
+    defer: Optional[FuzzyArrow] = None
+    """Date when the message is deferred to start."""
+
+    expire: Optional[FuzzyArrow] = None
+    """Date when the message expires."""
 
     @validator("env", pre=True)
     def preprocess_env(
