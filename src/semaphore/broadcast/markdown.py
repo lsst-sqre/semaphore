@@ -128,6 +128,13 @@ class BroadcastMarkdownFrontMatter(BaseModel):
     is applicable to all environments.
     """
 
+    timezone: datetime.tzinfo = dateutil.tz.UTC
+    """Default timezone for any datetime fields that don't contain explicit
+    datetimes.
+
+    If not set, the default timezone is UTC.
+    """
+
     defer: Optional[arrow.Arrow] = None
     """Date when the message is deferred to start."""
 
@@ -146,6 +153,21 @@ class BroadcastMarkdownFrontMatter(BaseModel):
         else:
             return v
 
+    @validator("timezone", pre=True)
+    def preprocess_timezone(
+        cls, v: Any, values: Dict[str, Any], **kwargs: Any
+    ) -> datetime.tzinfo:
+        """Convert a timezone into a tzinfo instance."""
+        if isinstance(v, datetime.tzinfo):
+            return v
+        elif isinstance(v, str):
+            tz = dateutil.tz.gettz(v)
+            if not isinstance(tz, datetime.tzinfo):
+                raise ValueError(f"Could not parse timezone from {v!s}")
+            return tz
+        else:
+            raise TypeError(f"Incorrect type for timezone, got {v!r}.")
+
     @validator("defer", "expire", pre=True)
     def preprocess_arrow(
         cls, v: Any, values: Dict[str, Any], **kwargs: Any
@@ -153,6 +175,9 @@ class BroadcastMarkdownFrontMatter(BaseModel):
         """Convert the nullable arrow.Arrow fields from either date.date,
         date.datetime, or fuzzy string froms into arrow.Arrow types with
         timezone information.
+
+        If a timezone is not set, the timezone defaults to teh value of the
+        `timezone` field.
         """
         if v is None:
             return None
@@ -177,8 +202,9 @@ class BroadcastMarkdownFrontMatter(BaseModel):
             # Parsed date includes a timezone.
             return arrow.get(dt)
         else:
-            # naive datetime, so default to UTC
-            return arrow.get(dt, dateutil.tz.UTC)
+            # naive datetime, so default to timezone from "timezone" field
+            default_tz = values.get("timezone", dateutil.tz.UTC)
+            return arrow.get(dt, default_tz)
 
     class Config:
         """Model configuration."""

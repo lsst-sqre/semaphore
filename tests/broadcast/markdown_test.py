@@ -163,3 +163,22 @@ def test_defer_expire_fuzzy(broadcasts_dir: Path) -> None:
     assert scheduler.end == arrow.get(
         datetime.datetime(2021, 1, 2, 4), dateutil.tz.UTC
     )
+
+
+def test_defer_expire_fuzzy_default_tz(broadcasts_dir: Path) -> None:
+    source_path = "defer-expire-fuzzy-default-tz.md"
+    text = broadcasts_dir.joinpath(source_path).read_text()
+
+    md = BroadcastMarkdown(text, source_path)
+    assert md.metadata.timezone == dateutil.tz.gettz("America/Los Angeles")
+
+    broadcast = md.to_broadcast()
+    scheduler = broadcast.scheduler
+    assert isinstance(scheduler, OneTimeScheduler)
+    assert scheduler.start == arrow.get(
+        datetime.datetime(2021, 1, 1, 12), dateutil.tz.UTC
+    )
+    assert scheduler.end == arrow.get(
+        datetime.datetime(2021, 1, 2, 4),
+        "America/Los Angeles",
+    )
