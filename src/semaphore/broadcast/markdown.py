@@ -5,7 +5,8 @@ front matter.
 from __future__ import annotations
 
 import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+import re
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Union
 
 import arrow
 import dateutil
@@ -14,7 +15,7 @@ import yaml
 from markdown_it import MarkdownIt
 from mdformat.renderer import MDRenderer
 from mdit_py_plugins.front_matter import front_matter_plugin
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, root_validator, validator
 
 from .data import BroadcastMessage, OneTimeScheduler, PermaScheduler
 
@@ -31,6 +32,26 @@ front matter.
 
 See https://markdown-it-py.readthedocs.io/en/latest/using.html#the-parser
 """
+
+timespan_pattern = re.compile(
+    r"((?P<weeks>\d+?)\s*(weeks|week|w))?\s*"
+    r"((?P<days>\d+?)\s*(days|day|d))?\s*"
+    r"((?P<hours>\d+?)\s*(hours|hour|hr|h))?\s*"
+    r"((?P<minutes>\d+?)\s*(minutes|minute|mins|min|m))?\s*"
+    r"((?P<seconds>\d+?)\s*(seconds|second|secs|sec|s))?$"
+)
+"""Regular expression pattern for a time duration."""
+
+
+def parse_timedelta(text: str) -> datetime.timedelta:
+    """Parse a `datetime.timedelta` from a string containing integer numbers
+    of weeks, days, hours, minutes, and seconds.
+    """
+    m = timespan_pattern.match(text.strip())
+    if m is None:
+        raise ValueError(f"Could not parse a timespan from {text!r}.")
+    td_args = {k: int(v) for k, v in m.groupdict().items() if v is not None}
+    return datetime.timedelta(**td_args)
 
 
 class BroadcastMarkdown:
@@ -109,8 +130,16 @@ class BroadcastMarkdown:
                 return OneTimeScheduler(
                     self.metadata.defer, self.metadata.expire
                 )
+            elif self.metadata.ttl is not None:
+                return OneTimeScheduler.from_ttl(
+                    self.metadata.defer, self.metadata.ttl
+                )
             else:
-                raise NotImplementedError("Implement TTL")
+                raise RuntimeError(
+                    "Cannot create scheduler from a defer date but no "
+                    "expire or ttl settings. This error is likely a Markdown "
+                    "front matter validation issue."
+                )
         else:
             return PermaScheduler()
 
@@ -140,6 +169,9 @@ class BroadcastMarkdownFrontMatter(BaseModel):
 
     expire: Optional[arrow.Arrow] = None
     """Date when the message expires."""
+
+    ttl: Optional[datetime.timedelta] = None
+    """Time duration if `expire` is not set with `defer`."""
 
     @validator("env", pre=True)
     def preprocess_env(
@@ -205,6 +237,43 @@ class BroadcastMarkdownFrontMatter(BaseModel):
             # naive datetime, so default to timezone from "timezone" field
             default_tz = values.get("timezone", dateutil.tz.UTC)
             return arrow.get(dt, default_tz)
+
+    @validator("ttl", pre=True)
+    def preprocess_timedelta(
+        cls, v: Any, values: Dict[str, Any], **kwargs: Any
+    ) -> Optional[datetime.timedelta]:
+        if v is None:
+            return None
+        elif isinstance(v, str):
+            return parse_timedelta(v)
+        elif isinstance(v, datetime.timedelta):
+            return v
+        else:
+            raise TypeError(f"Cannot parse timedelta from {v!r}")
+
+    @root_validator
+    def check_schedule_combinations(
+        cls, values: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        # expire and ttl cannot coexist
+        if values.get("expire") is not None and values.get("ttl") is not None:
+            raise ValueError(
+                '"expire" and "ttl" fields cannot be used together.'
+            )
+
+        # defer must be before expire
+        if (
+            values.get("defer") is not None
+            and values.get("expire") is not None
+        ):
+            _defer = values.get("defer")
+            assert isinstance(_defer, arrow.Arrow)  # for type-checking
+            _expire = values.get("expire")
+            assert isinstance(_expire, arrow.Arrow)  # for type-checking
+            if _expire < _defer:
+                raise ValueError('"expire" cannot happen before "defer"')
+
+        return values
 
     class Config:
         """Model configuration."""

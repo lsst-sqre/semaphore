@@ -7,12 +7,56 @@ from typing import TYPE_CHECKING
 
 import arrow
 import dateutil
+import pytest
+from pydantic import ValidationError
 
 from semaphore.broadcast.data import OneTimeScheduler
-from semaphore.broadcast.markdown import BroadcastMarkdown
+from semaphore.broadcast.markdown import (
+    BroadcastMarkdown,
+    BroadcastMarkdownFrontMatter,
+    parse_timedelta,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("1w", datetime.timedelta(weeks=1)),
+        ("1week", datetime.timedelta(weeks=1)),
+        ("2weeks", datetime.timedelta(weeks=2)),
+        ("1d", datetime.timedelta(days=1)),
+        ("1day", datetime.timedelta(days=1)),
+        ("2days", datetime.timedelta(days=2)),
+        ("1h", datetime.timedelta(hours=1)),
+        ("1hr", datetime.timedelta(hours=1)),
+        ("1hour", datetime.timedelta(hours=1)),
+        ("1hours", datetime.timedelta(hours=1)),
+        ("1m", datetime.timedelta(minutes=1)),
+        ("1min", datetime.timedelta(minutes=1)),
+        ("1mins", datetime.timedelta(minutes=1)),
+        ("1minute", datetime.timedelta(minutes=1)),
+        ("1minutes", datetime.timedelta(minutes=1)),
+        ("1s", datetime.timedelta(seconds=1)),
+        ("1sec", datetime.timedelta(seconds=1)),
+        ("1secs", datetime.timedelta(seconds=1)),
+        ("1second", datetime.timedelta(seconds=1)),
+        ("1seconds", datetime.timedelta(seconds=1)),
+        ("1w1d1h1m", datetime.timedelta(weeks=1, days=1, hours=1, minutes=1)),
+        (
+            "1w 1d 1h 1m",
+            datetime.timedelta(weeks=1, days=1, hours=1, minutes=1),
+        ),
+        ("2days 6hr", datetime.timedelta(days=2, hours=6)),
+        ("1w 2d 6hours", datetime.timedelta(weeks=1, days=2, hours=6)),
+        ("1 week 2 days 6hours", datetime.timedelta(weeks=1, days=2, hours=6)),
+    ],
+)
+def test_parse_timedelta(value: str, expected: datetime.timedelta) -> None:
+    td = parse_timedelta(value)
+    assert td == expected
 
 
 def test_evergreen(broadcasts_dir: Path) -> None:
@@ -182,3 +226,40 @@ def test_defer_expire_fuzzy_default_tz(broadcasts_dir: Path) -> None:
         datetime.datetime(2021, 1, 2, 4),
         "America/Los Angeles",
     )
+
+
+def test_defer_ttl(broadcasts_dir: Path) -> None:
+    source_path = "defer-ttl.md"
+    text = broadcasts_dir.joinpath(source_path).read_text()
+
+    md = BroadcastMarkdown(text, source_path)
+    broadcast = md.to_broadcast()
+    scheduler = broadcast.scheduler
+    assert isinstance(scheduler, OneTimeScheduler)
+    assert scheduler.start == arrow.get(
+        datetime.datetime(2021, 1, 1), dateutil.tz.UTC
+    )
+    assert scheduler.end == arrow.get(
+        datetime.datetime(2021, 1, 1, 1), dateutil.tz.UTC
+    )
+
+
+def test_frontmatter_expire_ttl_conflict() -> None:
+    """If frontmatter has both ttl and expire, validation should fail."""
+    with pytest.raises(ValidationError):
+        BroadcastMarkdownFrontMatter(
+            summary="The summary",
+            start="2021-01-01 12pm",
+            expire="2021-02-01 1pm",
+            ttl="2h",
+        )
+
+
+def test_frontmatter_expire_before_defer() -> None:
+    """If frontmatter defer is before start, validation should fail."""
+    with pytest.raises(ValidationError):
+        BroadcastMarkdownFrontMatter(
+            summary="The summary",
+            defer="2021-01-02 12pm",
+            expire="2021-01-01 1pm",
+        )
