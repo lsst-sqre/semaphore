@@ -195,22 +195,14 @@ class BroadcastMarkdownFrontMatter(BaseModel):
         else:
             return v
 
-    @validator("timezone", pre=True)
+    @validator("timezone", pre=True, allow_reuse=True)
     def preprocess_timezone(
         cls, v: Any, values: Dict[str, Any], **kwargs: Any
     ) -> datetime.tzinfo:
         """Convert a timezone into a tzinfo instance."""
-        if isinstance(v, datetime.tzinfo):
-            return v
-        elif isinstance(v, str):
-            tz = dateutil.tz.gettz(v)
-            if not isinstance(tz, datetime.tzinfo):
-                raise ValueError(f"Could not parse timezone from {v!s}")
-            return tz
-        else:
-            raise TypeError(f"Incorrect type for timezone, got {v!r}.")
+        return convert_to_tzinfo(v)
 
-    @validator("defer", "expire", pre=True)
+    @validator("defer", "expire", pre=True, allow_reuse=True)
     def preprocess_arrow(
         cls, v: Any, values: Dict[str, Any], **kwargs: Any
     ) -> Optional[arrow.Arrow]:
@@ -218,48 +210,24 @@ class BroadcastMarkdownFrontMatter(BaseModel):
         date.datetime, or fuzzy string froms into arrow.Arrow types with
         timezone information.
 
-        If a timezone is not set, the timezone defaults to teh value of the
+        If a timezone is not set, the timezone defaults to the value of the
         `timezone` field.
         """
         if v is None:
             return None
-        elif isinstance(v, datetime.date):
-            # Pydantic pre-parses YYYY-MM-DD into a datetime.date even if
-            # we didn't declare the field as a datetime.date type
-            dt = datetime.datetime.combine(v, datetime.time())
-        elif isinstance(v, datetime.datetime):
-            # Pydantic pre-parses timestamps into datetime.datetime even if
-            # we didn't declare the field as a datetime.datetime type
-            # Pydantic pre-parses into a datetime
-            dt = v
-        elif isinstance(v, str):
-            try:
-                dt = dateutil.parser.parse(v, fuzzy=True, yearfirst=True)
-            except (ValueError, OverflowError):
-                raise ValueError("Could not parse date")
         else:
-            raise TypeError(f"Not a string (got {v!r})")
+            return convert_to_arrow(
+                v, default_tz=values.get("timezone", dateutil.tz.UTC)
+            )
 
-        if dt.tzinfo:
-            # Parsed date includes a timezone.
-            return arrow.get(dt)
-        else:
-            # naive datetime, so default to timezone from "timezone" field
-            default_tz = values.get("timezone", dateutil.tz.UTC)
-            return arrow.get(dt, default_tz)
-
-    @validator("ttl", pre=True)
+    @validator("ttl", pre=True, allow_reuse=True)
     def preprocess_timedelta(
         cls, v: Any, values: Dict[str, Any], **kwargs: Any
     ) -> Optional[datetime.timedelta]:
         if v is None:
             return None
-        elif isinstance(v, str):
-            return parse_timedelta(v)
-        elif isinstance(v, datetime.timedelta):
-            return v
         else:
-            raise TypeError(f"Cannot parse timedelta from {v!r}")
+            return convert_to_timedelta(v)
 
     @root_validator
     def check_schedule_combinations(
@@ -289,3 +257,91 @@ class BroadcastMarkdownFrontMatter(BaseModel):
         """Model configuration."""
 
         arbitrary_types_allowed = True
+
+
+def convert_to_tzinfo(v: Any) -> datetime.tzinfo:
+    """Convert a value to a datetime.tzinfo.
+
+    This function is intended to be used in a validator for Pydantic models
+    and will raise ValueError or TypeError if ``v`` is not an appropriate
+    value.
+
+    Parameters
+    ----------
+    v : datetime.tzinfo, str
+        A value to convert into a timezone.
+    """
+    if isinstance(v, datetime.tzinfo):
+        return v
+    elif isinstance(v, str):
+        tz = dateutil.tz.gettz(v)
+        if not isinstance(tz, datetime.tzinfo):
+            raise ValueError(f"Could not parse timezone from {v!s}")
+        return tz
+    else:
+        raise TypeError(f"Incorrect type for timezone, got {v!r}.")
+
+
+def convert_to_arrow(v: Any, default_tz: Optional[Any] = None) -> arrow.Arrow:
+    """Convert a value to an arrow.Arrow datetime.
+
+    This function is intended to be used in a validator for Pydantic models,
+    and will raise ValueErrors or TypeErrors if ``v`` is not an appropriate
+    value.
+
+    Parameters
+    ----------
+    v : datetime.date, datetime.datetime, str
+        A value to convert into a datetime.
+    default_tz : datetime.tzinfo
+        A default timezone. If neither ``v`` has a timezone or ``default_tz``
+        is set, the default timezone is UTC.
+    """
+    if v is None:
+        raise ValueError("Cannot determine date from None")
+    elif isinstance(v, datetime.date):
+        # Pydantic pre-parses YYYY-MM-DD into a datetime.date even if
+        # we didn't declare the field as a datetime.date type
+        dt = datetime.datetime.combine(v, datetime.time())
+    elif isinstance(v, datetime.datetime):
+        # Pydantic pre-parses timestamps into datetime.datetime even if
+        # we didn't declare the field as a datetime.datetime type
+        # Pydantic pre-parses into a datetime
+        dt = v
+    elif isinstance(v, str):
+        try:
+            dt = dateutil.parser.parse(v, fuzzy=True, yearfirst=True)
+        except (ValueError, OverflowError):
+            raise ValueError("Could not parse date")
+    else:
+        raise TypeError(f"Not a string (got {v!r})")
+
+    if dt.tzinfo:
+        # Parsed date includes a timezone.
+        return arrow.get(dt)
+    else:
+        # naive datetime, so default to given timezone
+        if default_tz:
+            return arrow.get(dt, default_tz)
+        else:
+            return arrow.get(dt, dateutil.tz.UTC)
+
+
+def convert_to_timedelta(v: Any) -> datetime.timedelta:
+    """Convert a value to a datetime.timedelta.
+
+    This function is intended to be used in a validator for Pydantic models,
+    and will raise ValueErrors or TypeErrors if ``v`` is not an appropriate
+    value.
+
+    Parameters
+    ----------
+    v : datetime.timedelta, str
+        A value to convert into a timedelta.
+    """
+    if isinstance(v, str):
+        return parse_timedelta(v)
+    elif isinstance(v, datetime.timedelta):
+        return v
+    else:
+        raise TypeError(f"Cannot parse timedelta from {v!r}")
