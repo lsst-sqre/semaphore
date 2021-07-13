@@ -51,6 +51,44 @@ class PermaScheduler(Scheduler):
         return False
 
 
+class FixedExpirationScheduler(Scheduler):
+    """A scheduler that is active from now until a fixed date."""
+
+    def __init__(self, end: arrow.Arrow) -> None:
+        self._end = end
+
+    @property
+    def end(self) -> arrow.Arrow:
+        """The end date."""
+        return self._end
+
+    def is_active(self) -> bool:
+        return arrow.utcnow() < self.end
+
+    def has_future_events(self) -> bool:
+        return False
+
+
+class OpenEndedScheduler(Scheduler):
+    """A scheduler that has a fixed start time, but no end time."""
+
+    def __init__(self, start: arrow.Arrow) -> None:
+        self._start = start
+
+    @property
+    def start(self) -> arrow.Arrow:
+        return self._start
+
+    def is_active(self) -> bool:
+        return arrow.utcnow() >= self.start
+
+    def has_future_events(self) -> bool:
+        if arrow.utcnow() < self.start:
+            return True
+        else:
+            return False
+
+
 class OneTimeScheduler(Scheduler):
     """A scheduler for a single, fixed, time window.
 

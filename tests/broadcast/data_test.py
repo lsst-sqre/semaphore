@@ -9,7 +9,9 @@ from dateutil.rrule import DAILY, HOURLY, rrule, rruleset
 
 from semaphore.broadcast.data import (
     BroadcastMessage,
+    FixedExpirationScheduler,
     OneTimeScheduler,
+    OpenEndedScheduler,
     PermaScheduler,
     RepeatingScheduler,
 )
@@ -56,6 +58,42 @@ def test_onetimescheduler_active() -> None:
     """Test a OneTimeScheduler that is currently active."""
     start = arrow.utcnow().shift(minutes=-1)
     s = OneTimeScheduler.from_ttl(start, datetime.timedelta(hours=1))
+    assert s.is_active() is True
+    assert s.has_future_events() is False
+    assert s.is_stale() is False
+
+
+def test_fixedexpirationsscheduler_active() -> None:
+    """Test a FixedExpirationSchduler that is currently active."""
+    end = arrow.utcnow().shift(minutes=5)
+    s = FixedExpirationScheduler(end)
+    assert s.is_active() is True
+    assert s.has_future_events() is False
+    assert s.is_stale() is False
+
+
+def test_fixedexpirationsscheduler_expired() -> None:
+    """Test a FixedExpirationSchduler that has expired."""
+    end = arrow.utcnow().shift(minutes=-5)
+    s = FixedExpirationScheduler(end)
+    assert s.is_active() is False
+    assert s.has_future_events() is False
+    assert s.is_stale() is True
+
+
+def test_openendedscheduler_future() -> None:
+    """Test an OpenEndedScheduled that is set for the future."""
+    start = arrow.utcnow().shift(minutes=5)
+    s = OpenEndedScheduler(start)
+    assert s.is_active() is False
+    assert s.has_future_events() is True
+    assert s.is_stale() is False
+
+
+def test_openendedcheduler_active() -> None:
+    """Test an OpenEndedScheduler that is active."""
+    start = arrow.utcnow().shift(minutes=-5)
+    s = OpenEndedScheduler(start)
     assert s.is_active() is True
     assert s.has_future_events() is False
     assert s.is_stale() is False
