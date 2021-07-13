@@ -18,6 +18,11 @@ if TYPE_CHECKING:
 __all__ = [
     "BroadcastMessage",
     "Scheduler",
+    "PermaScheduler",
+    "RepeatingScheduler",
+    "OneTimeScheduler",
+    "OpenEndedScheduler",
+    "FixedExpirationScheduler",
 ]
 
 
@@ -270,6 +275,9 @@ class BroadcastMessage:
     - `PermaScheduler`
     - `OneTimeScheduler`
     - `RepeatingScheduler`
+    - `OneTimeScheduler`
+    - `OpenEndedScheduler`
+    - `FixedExpirationScheduler`
     """
 
     enabled: bool = True
