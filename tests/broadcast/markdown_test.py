@@ -10,7 +10,12 @@ import dateutil
 import pytest
 from pydantic import ValidationError
 
-from semaphore.broadcast.data import OneTimeScheduler
+from semaphore.broadcast.data import (
+    FixedExpirationScheduler,
+    OneTimeScheduler,
+    OpenEndedScheduler,
+    PermaScheduler,
+)
 from semaphore.broadcast.markdown import (
     BroadcastMarkdown,
     BroadcastMarkdownFrontMatter,
@@ -76,6 +81,7 @@ def test_evergreen(broadcasts_dir: Path) -> None:
     assert md.body == expected_body
 
     broadcast = md.to_broadcast()
+    assert isinstance(broadcast.scheduler, PermaScheduler)
     assert broadcast.summary_md == expected_summary
     assert broadcast.body_md == expected_body
     assert broadcast.source_path == source_path
@@ -241,6 +247,32 @@ def test_defer_ttl(broadcasts_dir: Path) -> None:
     )
     assert scheduler.end == arrow.get(
         datetime.datetime(2021, 1, 1, 1), dateutil.tz.UTC
+    )
+
+
+def test_defer_noexpire(broadcasts_dir: Path) -> None:
+    source_path = "defer-noexpire.md"
+    text = broadcasts_dir.joinpath(source_path).read_text()
+
+    md = BroadcastMarkdown(text, source_path)
+    broadcast = md.to_broadcast()
+    scheduler = broadcast.scheduler
+    assert isinstance(scheduler, OpenEndedScheduler)
+    assert scheduler.start == arrow.get(
+        datetime.datetime(2021, 1, 1), dateutil.tz.UTC
+    )
+
+
+def test_expire(broadcasts_dir: Path) -> None:
+    source_path = "expire.md"
+    text = broadcasts_dir.joinpath(source_path).read_text()
+
+    md = BroadcastMarkdown(text, source_path)
+    broadcast = md.to_broadcast()
+    scheduler = broadcast.scheduler
+    assert isinstance(scheduler, FixedExpirationScheduler)
+    assert scheduler.end == arrow.get(
+        datetime.datetime(2021, 1, 2), dateutil.tz.UTC
     )
 
 

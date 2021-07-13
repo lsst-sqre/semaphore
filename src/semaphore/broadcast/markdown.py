@@ -17,7 +17,13 @@ from mdformat.renderer import MDRenderer
 from mdit_py_plugins.front_matter import front_matter_plugin
 from pydantic import BaseModel, root_validator, validator
 
-from .data import BroadcastMessage, OneTimeScheduler, PermaScheduler
+from .data import (
+    BroadcastMessage,
+    FixedExpirationScheduler,
+    OneTimeScheduler,
+    OpenEndedScheduler,
+    PermaScheduler,
+)
 
 if TYPE_CHECKING:
     from markdown_it.token import Token
@@ -135,11 +141,11 @@ class BroadcastMarkdown:
                     self.metadata.defer, self.metadata.ttl
                 )
             else:
-                raise RuntimeError(
-                    "Cannot create scheduler from a defer date but no "
-                    "expire or ttl settings. This error is likely a Markdown "
-                    "front matter validation issue."
-                )
+                return OpenEndedScheduler(self.metadata.defer)
+        elif self.metadata.expire is not None:
+            # In this case, there is an expiration, but the defer must be
+            # none, so it is a fixed-expiration scheduler
+            return FixedExpirationScheduler(self.metadata.expire)
         else:
             return PermaScheduler()
 
