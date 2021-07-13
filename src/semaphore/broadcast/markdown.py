@@ -128,6 +128,7 @@ class BroadcastMarkdown:
             summary_md=self.metadata.summary,
             body_md=self.body,
             scheduler=self._make_scheduler(),
+            enabled=self.metadata.enabled,
         )
 
     def _make_scheduler(self) -> Scheduler:
@@ -178,6 +179,9 @@ class BroadcastMarkdownFrontMatter(BaseModel):
 
     ttl: Optional[datetime.timedelta] = None
     """Time duration if `expire` is not set with `defer`."""
+
+    enabled: bool = True
+    """Toggle to disable a message, overriding the scheduling."""
 
     @validator("env", pre=True)
     def preprocess_env(

@@ -110,6 +110,15 @@ def test_evergreen_no_body(broadcasts_dir: Path) -> None:
     assert broadcast.stale is False
 
 
+def test_evergreen_disabled(broadcasts_dir: Path) -> None:
+    source_path = "evergreen-disabled.md"
+    text = broadcasts_dir.joinpath(source_path).read_text()
+    md = BroadcastMarkdown(text, source_path)
+    broadcast = md.to_broadcast()
+    assert broadcast.active is False
+    assert broadcast.scheduler.is_active() is True
+
+
 def test_env_list(broadcasts_dir: Path) -> None:
     source_path = "env-list.md"
     text = broadcasts_dir.joinpath(source_path).read_text()
