@@ -272,10 +272,17 @@ class BroadcastMessage:
     - `RepeatingScheduler`
     """
 
+    enabled: bool = True
+    """A toggle for disabling a message, overriding the scheduler."""
+
     @property
     def active(self) -> bool:
-        """Whether the message should be served to clients for display."""
-        return self.scheduler.is_active()
+        """Whether the message should be served to clients for display.
+
+        The active state is determined by the scheduler, by can be overridden
+        by the "enabled" toggle attribute.
+        """
+        return self.enabled and self.scheduler.is_active()
 
     @property
     def stale(self) -> bool:

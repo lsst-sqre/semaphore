@@ -54,6 +54,18 @@ def test_broadcastmessage_without_body() -> None:
     assert m.stale is False
 
 
+def test_broadcastmessage_disabled() -> None:
+    m = BroadcastMessage(
+        source_path="demo.md",
+        summary_md="Summary",
+        body_md=None,
+        scheduler=PermaScheduler(),
+        enabled=False,
+    )
+    assert m.active is False
+    assert m.scheduler.is_active() is True
+
+
 def test_onetimescheduler_active() -> None:
     """Test a OneTimeScheduler that is currently active."""
     start = arrow.utcnow().shift(minutes=-1)
