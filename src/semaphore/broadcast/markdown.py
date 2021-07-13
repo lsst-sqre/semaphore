@@ -5,12 +5,14 @@ front matter.
 from __future__ import annotations
 
 import datetime
+import enum
 import re
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Union
 
 import arrow
 import dateutil
 import dateutil.parser
+import dateutil.rrule
 import yaml
 from markdown_it import MarkdownIt
 from mdformat.renderer import MDRenderer
@@ -23,6 +25,7 @@ from .data import (
     OneTimeScheduler,
     OpenEndedScheduler,
     PermaScheduler,
+    RecurringScheduler,
 )
 
 if TYPE_CHECKING:
@@ -147,8 +150,346 @@ class BroadcastMarkdown:
             # In this case, there is an expiration, but the defer must be
             # none, so it is a fixed-expiration scheduler
             return FixedExpirationScheduler(self.metadata.expire)
+        elif self.metadata.rules is not None and self.metadata.ttl is not None:
+            # Create a rruleset
+            rset = dateutil.rrule.rruleset(cache=True)
+            for rule in self.metadata.rules:
+                if isinstance(rule, RuleDate):
+                    if rule.exclude:
+                        rset.exdate(rule.to_datetime())
+                    else:
+                        rset.rdate(rule.to_datetime())
+                elif isinstance(rule, RecurringRule):
+                    if rule.exclude:
+                        rset.exrule(rule.to_rrule())
+                    else:
+                        rset.rrule(rule.to_rrule())
+            return RecurringScheduler(rruleset=rset, ttl=self.metadata.ttl)
         else:
             return PermaScheduler()
+
+
+class RuleDate(BaseModel):
+    """A date to include or exclude from a recurring rule schedule."""
+
+    timezone: Optional[datetime.tzinfo]
+    """Default timezone for any datetime fields that don't contain explicit
+    datetimes.
+    """
+
+    date: arrow.Arrow
+    """The datetime."""
+
+    exclude: bool = False
+    """Set to True to exclude these events from the schedule."""
+
+    @validator("timezone", pre=True, allow_reuse=True)
+    def preprocess_timezone(
+        cls, v: Any, values: Dict[str, Any], **kwargs: Any
+    ) -> datetime.tzinfo:
+        """Convert a timezone into a tzinfo instance."""
+        return convert_to_tzinfo(v)
+
+    @validator("date", allow_reuse=True)
+    def preprocess_arrow(
+        cls, v: Any, values: Dict[str, Any], **kwargs: Any
+    ) -> arrow.Arrow:
+        """Convert a datetime into a arrow.Arrow."""
+        return convert_to_arrow(
+            v, default_tz=values.get("timezone", dateutil.tz.UTC)
+        )
+
+    def to_datetime(self) -> datetime.datetime:
+        """Export as a datetime."""
+        return self.date.datetime
+
+    class Config:
+        """Model configuration."""
+
+        arbitrary_types_allowed = True
+
+
+class FreqEnum(str, enum.Enum):
+    """An enumeration of frequency labels for RecurringRule."""
+
+    # These are lower-cased versions of dateutil.rrule frequency attribute
+    # constants. The to_rrule_freq method transforms these labels
+    # to dateutil values (integers) for use with dateutil.
+    yearly = "yearly"
+    monthly = "monthly"
+    weekly = "weekly"
+    hourly = "hourly"
+    minutely = "minutely"
+
+    def to_rrule_freq(self) -> int:
+        """Converts the frequency to an integer for use as teh ``freq``
+        parameter in `dateutil.rrule.rrule`."""
+        return getattr(dateutil.rrule, self.name.upper())
+
+
+class WeekdayEnum(str, enum.Enum):
+    """A enumeration of weekday names."""
+
+    sunday = "sunday"
+    monday = "monday"
+    tuesday = "tuesday"
+    wednesday = "wednesday"
+    thursday = "thursday"
+    friday = "friday"
+    saturday = "saturday"
+
+    def to_rrule_weekday(self) -> dateutil.rrule.weekday:
+        """Convert the weekday to an `dateutil.rrule.weekday` for use with the
+        ``byweekday`` and ``wkst`` parameter of `dateutil.rrule.rrule`.
+        """
+        if self.name == "sunday":
+            return getattr(dateutil.rrule, "SU")
+        elif self.name == "monday":
+            return getattr(dateutil.rrule, "MO")
+        elif self.name == "tuesday":
+            return getattr(dateutil.rrule, "TU")
+        elif self.name == "wednesday":
+            return getattr(dateutil.rrule, "WE")
+        elif self.name == "thursday":
+            return getattr(dateutil.rrule, "TH")
+        elif self.name == "friday":
+            return getattr(dateutil.rrule, "FR")
+        else:
+            return getattr(dateutil.rrule, "SA")
+
+
+class ByWeekday(BaseModel):
+    """A Pydantic model for the ``by_weekday`` field in the `RecurringRule`
+    model.
+    """
+
+    day: WeekdayEnum
+    """The day of the week."""
+
+    index: Optional[int] = None
+    """The index of the weekday. For example, with a monthly recurrency
+    frequency, an index of ``1`` means the first of that weekday of the
+    month.
+    """
+
+    def to_rrule_weekday(self) -> dateutil.rrule.weekday:
+        """Convert to a `dateutil.rrule.weekday`, accounting for the index."""
+        weekday = self.day.to_rrule_weekday()
+        if self.index is not None:
+            return weekday(self.index)
+        else:
+            return weekday
+
+
+class RecurringRule(BaseModel):
+    """A recurring rule (rrule) to include or exclude from a recurring
+    schedule.
+
+    Notes
+    -----
+    This model is intended to be an inteferace for defining
+    `dateutil.rrule.rrule` instances. In turn, rrule is an implementation
+    of :rfc:`5545` (iCalendar). While the fields in this model generally match
+    up to `~dateutil.rrule.rrule` parameters and :rfc:`5545` syntax, the field
+    names here are slightly modified for consistency within the Semaphore app.
+    """
+
+    timezone: Optional[datetime.tzinfo]
+    """Default timezone for any datetime fields that don't contain explicit
+    datetimes.
+    """
+
+    freq: FreqEnum
+    """Frequency of recurrence."""
+
+    interval: int = 1
+    """The interval between each iteration.
+
+    For example, if ``freq`` is monthly, an interval of ``2`` means that the
+    rule triggers every two months.
+    """
+
+    start: Optional[arrow.Arrow] = None
+    """The date when the repeating rule starts. If not set, the rule is
+    assumed to start now.
+    """
+
+    end: Optional[arrow.Arrow] = None
+    """Then date when this rule ends. The last recurrence is the datetime
+    that is less than or equal to this date. If not set, the rule can recur
+    infinitely.
+    """
+
+    count: Optional[int] = None
+    """The number of occurrences of this recurring rule. The ``count`` must
+    be used exclusively of the ``end`` date field.
+    """
+
+    week_start: Optional[WeekdayEnum] = None
+    """The week start day for weekly frequencies."""
+
+    by_set_position: Optional[List[int]] = None
+    """Each integer specifies the occurence number within the recurrence
+    frequency (freq).
+
+    For example, with a monthly frequency, and a by_weekday of Friday, a
+    value of ``1`` specifies the first Friday of the month. Likewise, ``-1``
+    specifies the last Friday of the month.
+    """
+
+    by_month: Optional[List[int]] = None
+    """The months (1-12) when the recurrence happens. Use negative integers
+    to specify an index from the end of the year.
+    """
+
+    by_month_day: Optional[List[int]] = None
+    """The days of the month (1-31) when the recurrence happens. Use negative
+    integers to specify an index from the end of the month.
+    """
+
+    by_year_day: Optional[List[int]] = None
+    """The days of the year (1-366; allowing for leap years) when the
+    recurrence happens. Use negative integers to specify a day relative to the
+    end of the year.
+    """
+
+    by_week: Optional[List[int]] = None
+    """The weeks of the year (1-52) when the recurrence happens. Use negative
+    integers to specify a week relative to the end of the year. The definition
+    of week matches ISO 8601: the first week of the year is the one with at
+    least 4 days.
+    """
+
+    by_weekday: Optional[List[ByWeekday]] = None
+    """The days of the week when the recurrence happens."""
+
+    by_hour: Optional[List[int]] = None
+    """The hours of the day (0-23) when the recurrence happens."""
+
+    by_minute: Optional[List[int]] = None
+    """The minutes of the hour (0-23) when the recurrence happens."""
+
+    by_second: Optional[List[int]] = None
+    """The seconds of the minute (0-59) when the recurrence happens."""
+
+    exclude: bool = False
+    """Set to True to exclude these events from the schedule."""
+
+    @validator("timezone", pre=True, allow_reuse=True)
+    def preprocess_timezone(
+        cls, v: Any, values: Dict[str, Any], **kwargs: Any
+    ) -> datetime.tzinfo:
+        """Convert a timezone into a tzinfo instance."""
+        return convert_to_tzinfo(v)
+
+    @validator("start", "end", allow_reuse=True)
+    def preprocess_optional_arrow(
+        cls, v: Any, values: Dict[str, Any], **kwargs: Any
+    ) -> Optional[arrow.Arrow]:
+        """Convert a datetime into a arrow.Arrow, or None."""
+        if v is None:
+            return v
+        else:
+            return convert_to_arrow(
+                v, default_tz=values.get("timezone", dateutil.tz.UTC)
+            )
+
+    @validator("by_set_position", "by_year_day", each_item=True)
+    def check_year_day_index(cls, v: int) -> int:
+        if (v >= 1 and v <= 366) or (v <= -1 and v >= 366):
+            return v
+        else:
+            raise ValueError(
+                "value must be in the range [1, 366] or [-366, -1]"
+            )
+
+    @validator("by_month", each_item=True)
+    def check_month_index(cls, v: int) -> int:
+        if (v >= 1 and v <= 12) or (v <= -1 and v >= -12):
+            return v
+        else:
+            raise ValueError("value must be in the range [1, 12] or [-12, -1]")
+
+    @validator("by_month_day", each_item=True)
+    def check_month_day(cls, v: int) -> int:
+        if (v >= 1 and v <= 31) or (v <= -1 and v >= -31):
+            return v
+        else:
+            raise ValueError("value must be in the range [1, 31] or [-31, -1]")
+
+    @validator("by_week", each_item=True)
+    def check_week(cls, v: int) -> int:
+        if (v >= 1 and v <= 52) or (v <= -1 and v >= -52):
+            return v
+        else:
+            raise ValueError("value must be in the range [1, 52] or [-52, -1]")
+
+    @validator("by_hour", each_item=True)
+    def check_hour(cls, v: int) -> int:
+        if v >= 0 and v <= 23:
+            return v
+        else:
+            raise ValueError("value must be in the range [0, 23]")
+
+    @validator("by_minute", each_item=True)
+    def check_minute(cls, v: int) -> int:
+        if v >= 0 and v <= 59:
+            return v
+        else:
+            raise ValueError("value must be in the range [0, 59]")
+
+    @validator("by_second", each_item=True)
+    def check_second(cls, v: int) -> int:
+        if v >= 0 and v <= 59:
+            return v
+        else:
+            raise ValueError("value must be in the range [0, 59]")
+
+    @root_validator
+    def check_combinations(
+        cls, values: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        """Validate that fields are used together correctly.
+
+        Notes
+        -----
+        Rules:
+
+        - ``end`` and ``count`` cannot be used together.
+        """
+        if (values.get("end") is None) and (values.get("count") is None):
+            raise ValueError('"end" and "count" cannot be set simultaneously.')
+        return values
+
+    def to_rrule(self) -> dateutil.rrule.rrule:
+        """Export to a `dateutil.rrule.rrule`."""
+        return dateutil.rrule.rrule(
+            freq=self.freq.to_rrule_freq(),
+            dtstart=self.start.datetime if self.start else None,
+            interval=self.interval,
+            wkst=(
+                self.week_start.to_rrule_weekday() if self.week_start else None
+            ),
+            until=self.end.datetime if self.end else None,
+            bysetpos=self.by_set_position,
+            bymonth=self.by_month,
+            bymonthday=self.by_month_day,
+            byyearday=self.by_year_day,
+            byweekno=self.by_week,
+            byweekday=(
+                [w.to_rrule_weekday() for w in self.by_weekday]
+                if self.by_weekday
+                else None
+            ),
+            byhour=self.by_hour,
+            byminute=self.by_minute,
+            bysecond=self.by_second,
+        )
+
+    class Config:
+        """Model configuration."""
+
+        arbitrary_types_allowed = True
 
 
 class BroadcastMarkdownFrontMatter(BaseModel):
@@ -180,8 +521,30 @@ class BroadcastMarkdownFrontMatter(BaseModel):
     ttl: Optional[datetime.timedelta] = None
     """Time duration if `expire` is not set with `defer`."""
 
+    rules: Optional[List[Union[RecurringRule, RuleDate]]] = None
+    """For creating a repeating schedule, a list of rrule or dates to
+    include or exclude.
+    """
+
     enabled: bool = True
     """Toggle to disable a message, overriding the scheduling."""
+
+    @root_validator(pre=True)
+    def propagate_timezone(
+        cls, values: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        """A pre-validator that propagates timezone info from the top-level,
+        if present, into individual rules items, if present, and if those
+        items do not already have a non-None timezone.
+        """
+        if "timezone" in values.keys():
+            default_tz = values["timezone"]
+            if "rules" in values.keys():
+                for r in values["rules"]:
+                    if not r["timezone"]:
+                        r["timezone"] = default_tz
+
+        return values
 
     @validator("env", pre=True)
     def preprocess_env(
@@ -203,7 +566,7 @@ class BroadcastMarkdownFrontMatter(BaseModel):
         return convert_to_tzinfo(v)
 
     @validator("defer", "expire", pre=True, allow_reuse=True)
-    def preprocess_arrow(
+    def preprocess_optional_arrow(
         cls, v: Any, values: Dict[str, Any], **kwargs: Any
     ) -> Optional[arrow.Arrow]:
         """Convert the nullable arrow.Arrow fields from either date.date,
@@ -250,6 +613,23 @@ class BroadcastMarkdownFrontMatter(BaseModel):
             assert isinstance(_expire, arrow.Arrow)  # for type-checking
             if _expire < _defer:
                 raise ValueError('"expire" cannot happen before "defer"')
+
+        # rules does not coexist with defer or expire
+        if values.get("rules") is not None and values.get("defer") is not None:
+            raise ValueError(
+                '"rules" and "defer" fields cannot be used together.'
+            )
+        if (
+            values.get("rules") is not None
+            and values.get("expire") is not None
+        ):
+            raise ValueError(
+                '"rules" and "expire" fields cannot be used together.'
+            )
+
+        # rules must be used with ttl
+        if values.get("rules") is not None and values.get("ttl") is None:
+            raise ValueError('"ttl" must be specified with rules.')
 
         return values
 
