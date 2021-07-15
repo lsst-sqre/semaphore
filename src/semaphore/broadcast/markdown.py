@@ -154,7 +154,7 @@ class BroadcastMarkdown:
             # Create a rruleset
             rset = dateutil.rrule.rruleset(cache=True)
             for rule in self.metadata.rules:
-                if isinstance(rule, RuleDate):
+                if rule.date is not None:
                     if rule.exclude:
                         rset.exdate(rule.to_datetime())
                     else:
@@ -167,46 +167,6 @@ class BroadcastMarkdown:
             return RecurringScheduler(rruleset=rset, ttl=self.metadata.ttl)
         else:
             return PermaScheduler()
-
-
-class RuleDate(BaseModel):
-    """A date to include or exclude from a recurring rule schedule."""
-
-    timezone: Optional[datetime.tzinfo]
-    """Default timezone for any datetime fields that don't contain explicit
-    datetimes.
-    """
-
-    date: arrow.Arrow
-    """The datetime."""
-
-    exclude: bool = False
-    """Set to True to exclude these events from the schedule."""
-
-    @validator("timezone", pre=True, allow_reuse=True)
-    def preprocess_timezone(
-        cls, v: Any, values: Dict[str, Any], **kwargs: Any
-    ) -> datetime.tzinfo:
-        """Convert a timezone into a tzinfo instance."""
-        return convert_to_tzinfo(v)
-
-    @validator("date", allow_reuse=True)
-    def preprocess_arrow(
-        cls, v: Any, values: Dict[str, Any], **kwargs: Any
-    ) -> arrow.Arrow:
-        """Convert a datetime into a arrow.Arrow."""
-        return convert_to_arrow(
-            v, default_tz=values.get("timezone", dateutil.tz.UTC)
-        )
-
-    def to_datetime(self) -> datetime.datetime:
-        """Export as a datetime."""
-        return self.date.datetime
-
-    class Config:
-        """Model configuration."""
-
-        arbitrary_types_allowed = True
 
 
 class FreqEnum(str, enum.Enum):
@@ -299,7 +259,10 @@ class RecurringRule(BaseModel):
     datetimes.
     """
 
-    freq: FreqEnum
+    date: Optional[arrow.Arrow] = None
+    """A fixed datetime to include (or exclude) from the recurrence."""
+
+    freq: Optional[FreqEnum] = None
     """Frequency of recurrence."""
 
     interval: int = 1
@@ -382,7 +345,7 @@ class RecurringRule(BaseModel):
         """Convert a timezone into a tzinfo instance."""
         return convert_to_tzinfo(v)
 
-    @validator("start", "end", allow_reuse=True)
+    @validator("date", "start", "end", pre=True, allow_reuse=True)
     def preprocess_optional_arrow(
         cls, v: Any, values: Dict[str, Any], **kwargs: Any
     ) -> Optional[arrow.Arrow]:
@@ -456,35 +419,84 @@ class RecurringRule(BaseModel):
         Rules:
 
         - ``end`` and ``count`` cannot be used together.
+        - ``date`` cannot be used with the recurrence settings
+        - If ``date`` is none, ``freq`` must be set
         """
-        if (values.get("end") is None) and (values.get("count") is None):
+        if (values.get("date") is None) and (values.get("freq") is None):
+            raise ValueError('"freq" must be set for a recurring rule.')
+        if (values.get("end") is not None) and (
+            values.get("count") is not None
+        ):
             raise ValueError('"end" and "count" cannot be set simultaneously.')
+        if values.get("date") is not None:
+            # all recurring settings must not be set
+            recurring_attributes = [
+                "freq",
+                "start",
+                "end",
+                "count",
+                "week_start",
+                "by_set_position",
+                "by_month",
+                "by_month_day",
+                "by_year_day",
+                "by_hour",
+                "by_minute",
+                "by_second",
+            ]
+            for attr in recurring_attributes:
+                if values.get(attr) is not None:
+                    raise ValueError(
+                        '"date" cannot be used with fields for a recurring '
+                        "rule."
+                    )
         return values
 
     def to_rrule(self) -> dateutil.rrule.rrule:
         """Export to a `dateutil.rrule.rrule`."""
-        return dateutil.rrule.rrule(
-            freq=self.freq.to_rrule_freq(),
-            dtstart=self.start.datetime if self.start else None,
-            interval=self.interval,
-            wkst=(
-                self.week_start.to_rrule_weekday() if self.week_start else None
-            ),
-            until=self.end.datetime if self.end else None,
-            bysetpos=self.by_set_position,
-            bymonth=self.by_month,
-            bymonthday=self.by_month_day,
-            byyearday=self.by_year_day,
-            byweekno=self.by_week,
-            byweekday=(
-                [w.to_rrule_weekday() for w in self.by_weekday]
-                if self.by_weekday
-                else None
-            ),
-            byhour=self.by_hour,
-            byminute=self.by_minute,
-            bysecond=self.by_second,
-        )
+        if self.date is not None:
+            raise RuntimeError(
+                "Cannot export a fixed-date based rule as an rrule. "
+                "Use to_datetime() in this case."
+            )
+        if self.freq is None:
+            raise RuntimeError(
+                'Cannot export an rrule without a "freq" field.'
+            )
+        else:
+            return dateutil.rrule.rrule(
+                freq=self.freq.to_rrule_freq(),
+                dtstart=self.start.datetime if self.start else None,
+                interval=self.interval,
+                wkst=(
+                    self.week_start.to_rrule_weekday()
+                    if self.week_start
+                    else None
+                ),
+                until=self.end.datetime if self.end else None,
+                bysetpos=self.by_set_position,
+                bymonth=self.by_month,
+                bymonthday=self.by_month_day,
+                byyearday=self.by_year_day,
+                byweekno=self.by_week,
+                byweekday=(
+                    [w.to_rrule_weekday() for w in self.by_weekday]
+                    if self.by_weekday
+                    else None
+                ),
+                byhour=self.by_hour,
+                byminute=self.by_minute,
+                bysecond=self.by_second,
+            )
+
+    def to_datetime(self) -> datetime.datetime:
+        """Export to a `datetime.datetime.`"""
+        if self.date is None:
+            raise RuntimeError(
+                "Cannot export a recurrence-based rule as a single date. "
+                "Use to_rrule() in this case."
+            )
+        return self.date.datetime
 
     class Config:
         """Model configuration."""
@@ -521,7 +533,7 @@ class BroadcastMarkdownFrontMatter(BaseModel):
     ttl: Optional[datetime.timedelta] = None
     """Time duration if `expire` is not set with `defer`."""
 
-    rules: Optional[List[Union[RecurringRule, RuleDate]]] = None
+    rules: Optional[List[RecurringRule]] = None
     """For creating a repeating schedule, a list of rrule or dates to
     include or exclude.
     """
@@ -541,7 +553,7 @@ class BroadcastMarkdownFrontMatter(BaseModel):
             default_tz = values["timezone"]
             if "rules" in values.keys():
                 for r in values["rules"]:
-                    if not r["timezone"]:
+                    if r.get("timezone") is None:
                         r["timezone"] = default_tz
 
         return values

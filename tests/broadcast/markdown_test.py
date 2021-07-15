@@ -15,6 +15,7 @@ from semaphore.broadcast.data import (
     OneTimeScheduler,
     OpenEndedScheduler,
     PermaScheduler,
+    RecurringScheduler,
 )
 from semaphore.broadcast.markdown import (
     BroadcastMarkdown,
@@ -283,6 +284,15 @@ def test_expire(broadcasts_dir: Path) -> None:
     assert scheduler.end == arrow.get(
         datetime.datetime(2021, 1, 2), dateutil.tz.UTC
     )
+
+
+def test_patch_thursday(broadcasts_dir: Path) -> None:
+    source_path = "patch-thursday.md"
+    text = broadcasts_dir.joinpath(source_path).read_text()
+    md = BroadcastMarkdown(text, source_path)
+    broadcast = md.to_broadcast()
+    scheduler = broadcast.scheduler
+    assert isinstance(scheduler, RecurringScheduler)
 
 
 def test_frontmatter_expire_ttl_conflict() -> None:
