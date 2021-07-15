@@ -254,7 +254,7 @@ class RecurringScheduler(Scheduler):
 
 @dataclass
 class BroadcastMessage:
-    """A basic broadcast message that does not expire or repeat."""
+    """A broadcast message, including its content and schedule."""
 
     source_path: str
     """The path of the source in the GitHub repository, which serves as a
