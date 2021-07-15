@@ -19,7 +19,7 @@ __all__ = [
     "BroadcastMessage",
     "Scheduler",
     "PermaScheduler",
-    "RepeatingScheduler",
+    "RecurringScheduler",
     "OneTimeScheduler",
     "OpenEndedScheduler",
     "FixedExpirationScheduler",
@@ -149,14 +149,14 @@ class OneTimeScheduler(Scheduler):
             return False
 
 
-class RepeatingScheduler(Scheduler):
-    """A schedule based on repeating rule sets (RFC 5546).
+class RecurringScheduler(Scheduler):
+    """A schedule based on recurrence rule sets (RFC 5546).
 
     Parameters
     ----------
     rruleset : `dateutil.rrule.rruleset`
-        A repeating ruleset from the dateutil package. Rulesets can contain
-        both repeats, one-time dates, one-time exclusions, and so one. The
+        A recurrence ruleset from the dateutil package. Rulesets can contain
+        both repeats, one-time dates, one-time exclusions, and so on. The
         rruleset **must** have a UTC timezone. Time zones are not validated
         by the constructor.
     ttl : `datetime.timedela`
@@ -274,7 +274,7 @@ class BroadcastMessage:
 
     - `PermaScheduler`
     - `OneTimeScheduler`
-    - `RepeatingScheduler`
+    - `RecurringingScheduler`
     - `OneTimeScheduler`
     - `OpenEndedScheduler`
     - `FixedExpirationScheduler`
