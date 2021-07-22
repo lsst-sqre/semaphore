@@ -212,6 +212,11 @@ async def add_file_to_repository(
     logger.debug(
         "Downloaded broadcast from GitHub",
         message_id=dataclasses.asdict(identifier),
+        github_ratelimit_remaining=(
+            github_client.ratelimit.remaining
+            if github_client.rate_limit is not None
+            else "Unknown"
+        ),
     )
     broadcast_message = BroadcastMarkdown(
         text=markdown_text,
