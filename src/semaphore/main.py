@@ -21,24 +21,13 @@ configure_logging(
     name=config.logger_name,
 )
 
-app = FastAPI()
-app.include_router(internal_router)
-
-external_app = FastAPI(
-    title="Semaphore",
-    description=metadata("semaphore").get("Summary", ""),
-    version=metadata("semaphore").get("Version"),
-)
-
-# Define the external routes in a subapp so that it will serve its own OpenAPI
-# interface definition and documentation URLs under the external URL.
-external_app = FastAPI(
+app = FastAPI(
     title="Semaphore",
     description=metadata("semaphore").get("Summary", ""),
     version=metadata("semaphore").get("Version", "0.0.0"),
 )
-external_app.include_router(external_router)
-app.mount(f"/{config.name}", external_app)
+app.include_router(internal_router)
+app.include_router(external_router)
 
 
 @app.on_event("startup")

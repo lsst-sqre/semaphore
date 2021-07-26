@@ -1,16 +1,21 @@
-"""Handlers for the app's root endpoint, ``/``."""
+"""Handlers for the app's root endpoint, ``/``.
+
+These endpoints are internal because they are served from the root url
+rather than the application's path prefix. Therefore these endpoints don't
+receive web traffic from an ingress.
+"""
 
 from fastapi import APIRouter
 from safir.metadata import Metadata, get_metadata
 
 from semaphore.config import config
 
-__all__ = ["internal_router", "get_index"]
+__all__ = ["get_index"]
 
-internal_router = APIRouter()
+router = APIRouter()
 
 
-@internal_router.get(
+@router.get(
     "/",
     description=(
         "Returns metadata about the running application. Can also be used as "
