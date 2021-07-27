@@ -9,7 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
         with:
-          depth: 0 # full-depth clone for setuptools_scm
+          fetch-depth: 0 # full-depth clone for setuptools_scm
 
       - name: Set up Python
         uses: actions/setup-python@v2
@@ -31,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
         with:
-          depth: 0 # full-depth clone for setuptools_scm
+          fetch-depth: 0 # full-depth clone for setuptools_scm
 
       - name: Set up Python
         uses: actions/setup-python@v2
@@ -65,7 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
         with:
-          depth: 0 # full-depth clone for setuptools_scm
+          fetch-depth: 0 # full-depth clone for setuptools_scm
 
       - name: Define the Docker tag
         id: vars
