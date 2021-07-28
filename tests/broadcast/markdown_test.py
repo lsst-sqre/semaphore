@@ -32,6 +32,8 @@ if TYPE_CHECKING:
 class TestMessageId:
     """Message identifer for test data that conforms to MessageIdProtocol."""
 
+    __test__ = False  # exclude from Pytest collection based on name
+
     source_path: str
 
 
