@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from dataclasses import dataclass
 
 import arrow
 from dateutil.rrule import DAILY, HOURLY, rrule, rruleset
@@ -17,8 +18,20 @@ from semaphore.broadcast.models import (
 )
 
 
+@dataclass(frozen=True)
+class MockMessageId:
+    """A mock identifier for messages that conforms to teh AbstractMessageId
+    protocol.
+    """
+
+    key: str
+
+
 def test_broadcastmessage_with_body() -> None:
-    source_path = "broadcasts/demo.md"
+    """Test attribute access for a message, include content, status, and
+    identifier.
+    """
+    identifier = MockMessageId(key="broadcasts/demo.md")
     summary = "This is the **summary** content."
     body = (
         "This is the body of the message.\n"
@@ -26,12 +39,12 @@ def test_broadcastmessage_with_body() -> None:
         "The body is also markdown-formatted.\n"
     )
     m = BroadcastMessage(
-        source_path=source_path,
+        identifier=identifier,
         summary_md=summary,
         body_md=body,
         scheduler=PermaScheduler(),
     )
-    assert m.source_path == source_path
+    assert m.identifier == identifier
     assert m.summary_md == summary
     assert m.body_md == body
     assert m.active is True
@@ -39,15 +52,13 @@ def test_broadcastmessage_with_body() -> None:
 
 
 def test_broadcastmessage_without_body() -> None:
-    source_path = "broadcasts/demo.md"
     summary = "This is the **summary** content."
     m = BroadcastMessage(
-        source_path=source_path,
+        identifier=MockMessageId(key="test"),
         summary_md=summary,
         body_md=None,
         scheduler=PermaScheduler(),
     )
-    assert m.source_path == source_path
     assert m.summary_md == summary
     assert m.body_md is None
     assert m.active is True
@@ -56,7 +67,7 @@ def test_broadcastmessage_without_body() -> None:
 
 def test_broadcastmessage_disabled() -> None:
     m = BroadcastMessage(
-        source_path="demo.md",
+        identifier=MockMessageId(key="test"),
         summary_md="Summary",
         body_md=None,
         scheduler=PermaScheduler(),

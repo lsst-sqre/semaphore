@@ -31,7 +31,7 @@ from .models import (
 if TYPE_CHECKING:
     from markdown_it.token import Token
 
-    from .models import Scheduler
+    from .models import MessageIdProtocol, Scheduler
 
 __all__ = ["BroadcastMarkdown", "BroadcastMarkdownFrontMatter"]
 
@@ -72,14 +72,14 @@ class BroadcastMarkdown:
     text : `str`
         The content of the markdown message (including YAML-formatted
         front-matter).
-    source_path : `str`
-        A string that identifies the message, which is typically the POSIX path
-        of the markdown within the host GitHub repository.
+    identifier : `MessageIdProtocol`
+        A unique identifier that is associated with the markdown content,
+        compatible with the `semaphore.broadcast.models.MessageIdProtocol`.
     """
 
-    def __init__(self, text: str, source_path: str) -> None:
+    def __init__(self, text: str, identifier: MessageIdProtocol) -> None:
         self._text = text
-        self.source_path = source_path
+        self.identifier = identifier
         self._md_env: Dict[Any, Any] = {}
         self._md_tokens = md.parse(text, self._md_env)
         self._metadata = self._parse_metadata()
@@ -127,7 +127,7 @@ class BroadcastMarkdown:
             The broadcast message.
         """
         return BroadcastMessage(
-            source_path=self.source_path,
+            identifier=self.identifier,
             summary_md=self.metadata.summary,
             body_md=self.body,
             scheduler=self._make_scheduler(),
