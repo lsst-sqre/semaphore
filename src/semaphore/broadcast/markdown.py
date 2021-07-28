@@ -19,7 +19,7 @@ from mdformat.renderer import MDRenderer
 from mdit_py_plugins.front_matter import front_matter_plugin
 from pydantic import BaseModel, root_validator, validator
 
-from .data import (
+from .models import (
     BroadcastMessage,
     FixedExpirationScheduler,
     OneTimeScheduler,
@@ -31,7 +31,7 @@ from .data import (
 if TYPE_CHECKING:
     from markdown_it.token import Token
 
-    from .data import Scheduler
+    from .models import Scheduler
 
 __all__ = ["BroadcastMarkdown", "BroadcastMarkdownFrontMatter"]
 

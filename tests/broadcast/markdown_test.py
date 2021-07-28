@@ -10,17 +10,17 @@ import dateutil
 import pytest
 from pydantic import ValidationError
 
-from semaphore.broadcast.data import (
+from semaphore.broadcast.markdown import (
+    BroadcastMarkdown,
+    BroadcastMarkdownFrontMatter,
+    parse_timedelta,
+)
+from semaphore.broadcast.models import (
     FixedExpirationScheduler,
     OneTimeScheduler,
     OpenEndedScheduler,
     PermaScheduler,
     RecurringScheduler,
-)
-from semaphore.broadcast.markdown import (
-    BroadcastMarkdown,
-    BroadcastMarkdownFrontMatter,
-    parse_timedelta,
 )
 
 if TYPE_CHECKING:

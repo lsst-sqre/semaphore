@@ -1,4 +1,4 @@
-"""Tests for the semaphore.broadcast.data module."""
+"""Tests for the semaphore.broadcast.models module."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import datetime
 import arrow
 from dateutil.rrule import DAILY, HOURLY, rrule, rruleset
 
-from semaphore.broadcast.data import (
+from semaphore.broadcast.models import (
     BroadcastMessage,
     FixedExpirationScheduler,
     OneTimeScheduler,

@@ -1,4 +1,4 @@
-"""Data containers for broadcast messages."""
+"""Domain models for broadcast messages."""
 
 from __future__ import annotations
 
