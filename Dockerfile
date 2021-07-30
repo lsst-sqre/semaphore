@@ -66,10 +66,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 # modified by the virtualenv.
 ENV MODULE_NAME=semaphore.main
 
-# The default starts 40 workers, which exhausts the available connections
-# on a micro Cloud SQL PostgreSQL server and seems excessive since we can
-# scale with Kubernetes.  Cap the workers at 10.
-ENV MAX_WORKERS=10
+# Limit to 1 because of the current in-memory data persistence for broadcasts.
+# Once persistent storage is added, change this to 10 which works well with
+# the Cloud SQL Postgres server.
+ENV MAX_WORKERS=1
 
 # Run on port 8080 instead of the FastAPI default for backward compatibility.
 ENV PORT=8080
