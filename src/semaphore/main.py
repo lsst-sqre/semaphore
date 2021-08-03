@@ -29,6 +29,9 @@ app = FastAPI(
     title="Semaphore",
     description=metadata("semaphore").get("Summary", ""),
     version=metadata("semaphore").get("Version", "0.0.0"),
+    docs_url=f"/{config.name}/docs",
+    redoc_url=f"/{config.name}/redoc",
+    openapi_url=f"/{config.name}/openapi.json",
 )
 app.include_router(internal_router)
 app.include_router(external_router)
