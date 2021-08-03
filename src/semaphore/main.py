@@ -15,6 +15,7 @@ from .dependencies.broadcastrepo import broadcast_repo_dependency
 from .github.broadcastservices import bootstrap_broadcast_repo
 from .handlers.external import external_router
 from .handlers.internal import internal_router
+from .handlers.v1 import v1_router
 
 __all__ = ["app"]
 
@@ -31,6 +32,7 @@ app = FastAPI(
 )
 app.include_router(internal_router)
 app.include_router(external_router)
+app.include_router(v1_router)
 
 
 @app.on_event("startup")
