@@ -76,6 +76,17 @@ class Config(BaseSettings):
     manually toggled to False if necessary.
     """
 
+    phalanx_env: str = Field(..., env="SEMAPHORE_PHALANX_ENV")
+    """Name of the Phalanx environment this Semaphore installation is running
+    in (e.g. ``idfprod``).
+
+    This configuration aids in determining which broadcast messages from a
+    shared GitHub repository to index, based on the ``env`` YAML/markdown
+    front-matter keyword.
+
+    For a list of environments, see https://github.com/lsst-sqre/phalanx.
+    """
+
     @validator("github_webhook_secret", "github_app_private_key", pre=True)
     def validate_none_secret(
         cls, v: Optional[SecretStr]

@@ -18,6 +18,7 @@ from gidgethub import GitHubException, RateLimitExceeded
 from gidgethub.sansio import accept_format
 
 from semaphore.broadcast.markdown import BroadcastMarkdown
+from semaphore.config import config
 
 from .client import (
     create_github_client,
@@ -228,6 +229,8 @@ async def add_file_to_repository(
         Raised if there is an issue with GitHub. The sub-class
         RateLimitExceeded indicates if the client has exceeded its rate limit.
     """
+    logger = logger.bind(message_id=dataclasses.asdict(identifier))
+
     markdown_text = await github_client.getitem(
         contents_url,
         url_vars={"path": file_path},
@@ -235,17 +238,24 @@ async def add_file_to_repository(
     )
     logger.debug(
         "Downloaded broadcast from GitHub",
-        message_id=dataclasses.asdict(identifier),
         github_ratelimit_remaining=(
             github_client.rate_limit.remaining
             if github_client.rate_limit is not None
             else "Unknown"
         ),
     )
-    broadcast_message = BroadcastMarkdown(
+    broadcast_markdown = BroadcastMarkdown(
         text=markdown_text,
         identifier=identifier,
-    ).to_broadcast()
+    )
+    if not broadcast_markdown.is_relevant_to_env(config.phalanx_env):
+        logger.debug(
+            "Skipping broadcast message from GitHub because it is "
+            "irrelevant to this Phalanx environment."
+        )
+        return
+
+    broadcast_message = broadcast_markdown.to_broadcast()
     broadcast_repo.add(broadcast_message)
     logger.debug(
         "Added broadcast to the repository",

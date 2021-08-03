@@ -118,6 +118,30 @@ class BroadcastMarkdown:
         else:
             return MDRenderer().render(body_tokens, md.options, self._md_env)
 
+    def is_relevant_to_env(self, env_name: str) -> bool:
+        """Determine if this broadcast message is relevant to the given
+        Phalanx environment name given the ``env`` key in the front matter.
+
+        A message is considered "relevant" if the message's ``env`` key isn't
+        set (`None`) or if the given environment is in the list of
+        environment names.
+
+        Parameters
+        ----------
+        env_name : `str`
+            Name of the Phalanx environment (e.g., `idf-prod`).
+
+        Returns
+        -------
+        `bool`
+            `True`, if the message should be included in that environment's
+            broadcast message. `False` otherwise.
+        """
+        if (self._metadata.env is None) or (env_name in self._metadata.env):
+            return True
+        else:
+            return False
+
     def to_broadcast(self) -> BroadcastMessage:
         """Export a BroadcastMessage from the markdown content.
 
