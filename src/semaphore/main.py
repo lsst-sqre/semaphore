@@ -6,6 +6,7 @@ from importlib.metadata import metadata
 
 import structlog
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from safir.dependencies.http_client import http_client_dependency
 from safir.logging import configure_logging
 from safir.middleware.x_forwarded import XForwardedMiddleware
@@ -44,6 +45,15 @@ async def startup_event() -> None:
     logger.info("Running startup")
 
     app.add_middleware(XForwardedMiddleware)
+    # This CORS policy is quite liberal. When the API becomes writeable we'll
+    # need to revisit this.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins="*",
+        allow_credentials=False,
+        allow_methods=["GET"],
+        allow_headers=["*"],
+    )
 
     if config.enable_github_app:
         await bootstrap_broadcast_repo(
