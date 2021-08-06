@@ -26,8 +26,7 @@ def get_broadcasts(
         broadcast_repo_dependency
     ),
 ) -> List[BroadcastMessageModel]:
-    messages: List[BroadcastMessageModel] = []
-    for m in broadcast_repo.iter_active():
-        message_record = BroadcastMessageModel.from_broadcast_message(m)
-        messages.append(message_record)
-    return messages
+    return [
+        BroadcastMessageModel.from_broadcast_message(m)
+        for m in broadcast_repo.iter_active()
+    ]
