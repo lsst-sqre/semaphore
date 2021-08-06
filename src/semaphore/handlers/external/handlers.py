@@ -80,15 +80,13 @@ async def post_github_webhook(
 
     body = await request.body()
 
-    try:
-        # FIXME workaround for typing
-        assert config.github_webhook_secret is not None
-        webhook_secret = config.github_webhook_secret.get_secret_value()
-    except AttributeError:
+    if config.github_webhook_secret is None:
         return Response(
             "The webhook secret is not configured",
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
         )
+
+    webhook_secret = config.github_webhook_secret.get_secret_value()
     event = Event.from_http(request.headers, body, secret=webhook_secret)
 
     if event.event == "ping":
