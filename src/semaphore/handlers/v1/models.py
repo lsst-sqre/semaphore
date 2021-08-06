@@ -85,11 +85,9 @@ class BroadcastMessageModel(BaseModel):
             The message entity for the v1 API.
         """
         formatted_summary = FormattedText.from_gfm(message.summary_md)
-        formatted_body = (
-            FormattedText.from_gfm(message.body_md)
-            if message.body_md is not None
-            else None
-        )
+        formatted_body = None
+        if message.body_md is not None:
+            formatted_body = FormattedText.from_gfm(message.body_md)
         return cls(
             id=hash(message.identifier),
             summary=formatted_summary,
