@@ -28,7 +28,14 @@ configure_logging(
 
 app = FastAPI(
     title="Semaphore",
-    description=metadata("semaphore").get("Summary", ""),
+    description=(
+        "Semaphore is the user message and notification system for the "
+        "Rubin Science Platform.\n\n"
+        "You can find Semaphore's user and developer documentation at "
+        "[https://semaphore.lsst.io](https://semaphore.lsst.io). "
+        "Semaphore is developed at [https://github.com/lsst-sqre/semaphore]"
+        "(https://github.com/lsst-sqre/semaphore)"
+    ),
     version=metadata("semaphore").get("Version", "0.0.0"),
     docs_url=f"/{config.name}/docs",
     redoc_url=f"/{config.name}/redoc",

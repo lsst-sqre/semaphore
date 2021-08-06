@@ -17,6 +17,7 @@ router = APIRouter()
 
 @router.get(
     "/",
+    summary="Health check",
     description=(
         "Returns metadata about the running application. Can also be used as "
         "a health check. This route is not exposed outside the cluster and "
@@ -24,7 +25,7 @@ router = APIRouter()
     ),
     response_model=Metadata,
     response_model_exclude_none=True,
-    summary="Application metadata",
+    tags=["internal"],
 )
 async def get_index() -> Metadata:
     """GET ``/`` (the app's internal root).

@@ -18,8 +18,10 @@ router = APIRouter(prefix=f"/{config.name}/v1")
 
 @router.get(
     "/broadcasts",
+    summary="Get broadcasts",
     description="List broadcast messages.",
     response_model=List[BroadcastMessageModel],
+    tags=["broadcasts"],
 )
 def get_broadcasts(
     broadcast_repo: BroadcastMessageRepository = Depends(

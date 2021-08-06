@@ -31,13 +31,14 @@ These routes have paths prefixed by the application name.
 
 @router.get(
     "/",
+    summary="Application metadata",
     description=(
-        "Document the top-level API here. By default it only returns metadata "
-        "about the application."
+        "Semaphore's API entrypoint provides metadata about the service "
+        "version and configuration information."
     ),
     response_model=Index,
     response_model_exclude_none=True,
-    summary="Application metadata",
+    tags=["internal"],
 )
 async def get_index(
     logger: BoundLogger = Depends(logger_dependency),
@@ -55,13 +56,21 @@ async def get_index(
         package_name="semaphore",
         application_name=config.name,
     )
-    return Index(metadata=metadata)
+    return Index(
+        metadata=metadata,
+        github_app_id=config.github_app_id,
+        github_app_enabled=config.enable_github_app,
+        api_docs_path=f"/{config.name}/docs",
+        openapi_path=f"/{config.name}/openapi.json",
+    )
 
 
 @router.post(
     "/github/webhook",
+    summary="GitHub App webhook",
     description=("This endpoint receives webhook events from GitHub"),
     status_code=status.HTTP_200_OK,
+    tags=["internal"],
 )
 async def post_github_webhook(
     request: Request,
