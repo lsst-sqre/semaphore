@@ -55,10 +55,11 @@ async def startup_event() -> None:
         allow_headers=["*"],
     )
 
+    broadcast_repo = await broadcast_repo_dependency()
     if config.enable_github_app:
         await bootstrap_broadcast_repo(
             http_client=http_client_dependency(),
-            broadcast_repo=broadcast_repo_dependency(),
+            broadcast_repo=broadcast_repo,
             logger=logger,
         )
 

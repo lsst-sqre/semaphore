@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 @pytest.mark.asyncio
 async def test_get_broadcasts(client: AsyncClient) -> None:
     """Test ``GET /semaphore/v1/broadcasts."""
-    broadcast_repo = broadcast_repo_dependency()
+    broadcast_repo = await broadcast_repo_dependency()
 
     response = await client.get("/semaphore/v1/broadcasts")
     assert response.status_code == 200

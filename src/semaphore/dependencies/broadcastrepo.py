@@ -14,7 +14,7 @@ class BroadcastRepoDependency:
     def __init__(self) -> None:
         self.repo = BroadcastMessageRepository()
 
-    def __call__(self) -> BroadcastMessageRepository:
+    async def __call__(self) -> BroadcastMessageRepository:
         """Return the broadcast message repository."""
         return self.repo
 
