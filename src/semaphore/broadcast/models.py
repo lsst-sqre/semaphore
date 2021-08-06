@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING
 
 import arrow
 
@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
 
 __all__ = [
-    "MessageIdProtocol",
     "BroadcastMessage",
     "Scheduler",
     "PermaScheduler",
@@ -237,24 +236,11 @@ class RecurringScheduler(Scheduler):
         return (candidate_start, candidate_end)
 
 
-class MessageIdProtocol(Protocol):
-    """A protocol for broadcast message identifiers.
-
-    Identifiers must implement ``__hash__`` and ``__eq__`` methods.
-    """
-
-    def __hash__(self) -> int:
-        raise NotImplementedError()
-
-    def __eq__(self, other: Any) -> bool:
-        raise NotImplementedError()
-
-
 @dataclass
 class BroadcastMessage:
     """A broadcast message, including its content and schedule."""
 
-    identifier: MessageIdProtocol
+    identifier: str
     """The message's identifier."""
 
     summary_md: str

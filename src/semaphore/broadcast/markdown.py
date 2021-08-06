@@ -31,7 +31,7 @@ from .models import (
 if TYPE_CHECKING:
     from markdown_it.token import Token
 
-    from .models import MessageIdProtocol, Scheduler
+    from .models import Scheduler
 
 __all__ = ["BroadcastMarkdown", "BroadcastMarkdownFrontMatter"]
 
@@ -72,12 +72,11 @@ class BroadcastMarkdown:
     text : `str`
         The content of the markdown message (including YAML-formatted
         front-matter).
-    identifier : `MessageIdProtocol`
-        A unique identifier that is associated with the markdown content,
-        compatible with the `semaphore.broadcast.models.MessageIdProtocol`.
+    identifier : `str`
+        A unique identifier that is associated with the markdown content.
     """
 
-    def __init__(self, text: str, identifier: MessageIdProtocol) -> None:
+    def __init__(self, text: str, identifier: str) -> None:
         self._text = text
         self.identifier = identifier
         self._md_env: Dict[Any, Any] = {}

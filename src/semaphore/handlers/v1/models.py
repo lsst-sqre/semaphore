@@ -89,7 +89,7 @@ class BroadcastMessageModel(BaseModel):
         if message.body_md is not None:
             formatted_body = FormattedText.from_gfm(message.body_md)
         return cls(
-            id=hash(message.identifier),
+            id=message.identifier,
             summary=formatted_summary,
             body=formatted_body,
             active=message.active,

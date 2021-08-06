@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Dict, Iterator, Optional, Sequence
 
 if TYPE_CHECKING:
-    from .models import BroadcastMessage, MessageIdProtocol
+    from .models import BroadcastMessage
 
 
 class NotFoundError(Exception):
@@ -31,7 +31,7 @@ class BroadcastMessageRepository:
     def __init__(
         self, messages: Optional[Sequence[BroadcastMessage]] = None
     ) -> None:
-        self._messages: Dict[MessageIdProtocol, BroadcastMessage] = {}
+        self._messages: Dict[str, BroadcastMessage] = {}
         if messages is not None:
             for message in messages:
                 self.add(message)
@@ -47,10 +47,10 @@ class BroadcastMessageRepository:
         """
         self._messages[message.identifier] = message
 
-    def __contains__(self, identifier: MessageIdProtocol) -> bool:
+    def __contains__(self, identifier: str) -> bool:
         return identifier in self._messages.keys()
 
-    def __getitem__(self, identifier: MessageIdProtocol) -> BroadcastMessage:
+    def __getitem__(self, identifier: str) -> BroadcastMessage:
         """Get an item based on a message's identifier.
 
         Parameters
@@ -70,7 +70,7 @@ class BroadcastMessageRepository:
         """
         return self.get(identifier)
 
-    def get(self, identifier: MessageIdProtocol) -> BroadcastMessage:
+    def get(self, identifier: str) -> BroadcastMessage:
         """Get an item based on a message's identifier.
 
         Parameters
@@ -124,9 +124,7 @@ class BroadcastMessageRepository:
             if message.scheduler.has_future_events():
                 yield message
 
-    def remove(
-        self, identifier: MessageIdProtocol, raise_if_missing: bool = False
-    ) -> None:
+    def remove(self, identifier: str, raise_if_missing: bool = False) -> None:
         """Remove the message."""
         try:
             del self._messages[identifier]

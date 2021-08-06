@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime
-from dataclasses import dataclass
 
 import arrow
 from dateutil.rrule import DAILY, HOURLY, rrule, rruleset
@@ -18,20 +17,11 @@ from semaphore.broadcast.models import (
 )
 
 
-@dataclass(frozen=True)
-class MockMessageId:
-    """A mock identifier for messages that conforms to teh AbstractMessageId
-    protocol.
-    """
-
-    key: str
-
-
 def test_broadcastmessage_with_body() -> None:
     """Test attribute access for a message, include content, status, and
     identifier.
     """
-    identifier = MockMessageId(key="broadcasts/demo.md")
+    identifier = "broadcasts/demo.md"
     summary = "This is the **summary** content."
     body = (
         "This is the body of the message.\n"
@@ -54,7 +44,7 @@ def test_broadcastmessage_with_body() -> None:
 def test_broadcastmessage_without_body() -> None:
     summary = "This is the **summary** content."
     m = BroadcastMessage(
-        identifier=MockMessageId(key="test"),
+        identifier="test",
         summary_md=summary,
         body_md=None,
         scheduler=PermaScheduler(),
@@ -67,7 +57,7 @@ def test_broadcastmessage_without_body() -> None:
 
 def test_broadcastmessage_disabled() -> None:
     m = BroadcastMessage(
-        identifier=MockMessageId(key="test"),
+        identifier="test",
         summary_md="Summary",
         body_md=None,
         scheduler=PermaScheduler(),

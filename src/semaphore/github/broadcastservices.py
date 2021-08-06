@@ -41,9 +41,9 @@ message files.
 
 
 @dataclasses.dataclass(frozen=True)
-class GitHubMessageId:
+class GitHubMessageRef:
     """An identifier for referencing broadcast messages sourced from GitHub in
-    the BroadcastMessageRepostory, compatible with the MessageId protocol.
+    the BroadcastMessageRepostory.
     """
 
     path: str
@@ -61,13 +61,28 @@ class GitHubMessageId:
     """Git ref (e.g. ``refs/heads/main``)"""
 
     @classmethod
-    def from_push_event(cls, *, path: str, event: Event) -> GitHubMessageId:
+    def from_push_event(cls, *, path: str, event: Event) -> GitHubMessageRef:
         return cls(
             path=path,
             repo_name=event.data["repository"]["name"],
             repo_owner=event.data["repository"]["owner"]["name"],
             ref=event.data["ref"],
         )
+
+    def as_id(self) -> str:
+        """Convert to a string format for use as a BroadcastMessage.identifier
+        attribute.
+        """
+        return (
+            f"github.com/{self.repo_owner}/{self.repo_name}/{self.path}/"
+            f"?ref={self.ref}"
+        )
+
+    def as_dict(self) -> Dict[str, str]:
+        """Express the message as a dict, which is useful for establishing
+        logging context.
+        """
+        return dataclasses.asdict(self)
 
 
 async def update_broadcast_repo_from_push_event(
@@ -104,11 +119,11 @@ async def update_broadcast_repo_from_push_event(
     )
 
     for path in filter(is_broadcast_message, files_written):
-        message_id = GitHubMessageId.from_push_event(path=path, event=event)
+        message_ref = GitHubMessageRef.from_push_event(path=path, event=event)
         try:
             await add_file_to_repository(
                 file_path=path,
-                identifier=message_id,
+                message_ref=message_ref,
                 contents_url=event.data["repository"]["contents_url"],
                 broadcast_repo=broadcast_repo,
                 github_client=github_client,
@@ -129,11 +144,13 @@ async def update_broadcast_repo_from_push_event(
             continue
 
     for path in filter(is_broadcast_message, files_removed):
-        message_id = GitHubMessageId.from_push_event(path=path, event=event)
+        message_id = GitHubMessageRef.from_push_event(
+            path=path, event=event
+        ).as_id()
         broadcast_repo.remove(message_id)
         logger.debug(
             "Removed message from repo",
-            message_id=dataclasses.asdict(message_id),
+            message_id=message_id,
         )
 
 
@@ -198,7 +215,7 @@ def is_broadcast_message(path: str) -> bool:
 async def add_file_to_repository(
     *,
     file_path: str,
-    identifier: GitHubMessageId,
+    message_ref: GitHubMessageRef,
     contents_url: str,
     broadcast_repo: BroadcastMessageRepository,
     github_client: GitHubAPI,
@@ -211,8 +228,8 @@ async def add_file_to_repository(
     ----------
     file_path : str
         Posix path of the message's file in GitHub.
-    identifier : `GitHubMessageId`
-        The file's GitHub message ID.
+    message_ref : `GitHubMessageRef`
+        Reference for the message.
     contents_url : `str`
         The URI template for the repository's contents (the template
         includs a ``path`` variable).
@@ -229,7 +246,7 @@ async def add_file_to_repository(
         Raised if there is an issue with GitHub. The sub-class
         RateLimitExceeded indicates if the client has exceeded its rate limit.
     """
-    logger = logger.bind(message_id=dataclasses.asdict(identifier))
+    logger = logger.bind(message_id=message_ref.as_id())
 
     markdown_text = await github_client.getitem(
         contents_url,
@@ -246,7 +263,7 @@ async def add_file_to_repository(
     )
     broadcast_markdown = BroadcastMarkdown(
         text=markdown_text,
-        identifier=identifier,
+        identifier=message_ref.as_id(),
     )
     if not broadcast_markdown.is_relevant_to_env(config.phalanx_env):
         logger.debug(
@@ -259,7 +276,6 @@ async def add_file_to_repository(
     broadcast_repo.add(broadcast_message)
     logger.debug(
         "Added broadcast to the repository",
-        message_id=dataclasses.asdict(identifier),
     )
 
 
@@ -303,14 +319,15 @@ async def bootstrap_broadcast_repo(
                 directory_path=BROADCASTS_DIR,
             ):
                 if is_broadcast_message(file_obj["path"]):
+                    message_ref = GitHubMessageRef(
+                        path=file_obj["path"],
+                        repo_name=github_repo["name"],
+                        repo_owner=github_repo["owner"]["login"],
+                        ref=f'refs/heads/{github_repo["default_branch"]}',
+                    )
                     await add_file_to_repository(
                         file_path=file_obj["path"],
-                        identifier=GitHubMessageId(
-                            path=file_obj["path"],
-                            repo_name=github_repo["name"],
-                            repo_owner=github_repo["owner"]["login"],
-                            ref=f'refs/heads/{github_repo["default_branch"]}',
-                        ),
+                        message_ref=message_ref,
                         contents_url=github_repo["contents_url"],
                         broadcast_repo=broadcast_repo,
                         github_client=installation_client,
