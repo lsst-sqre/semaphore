@@ -15,10 +15,18 @@ starlette
 uvicorn[standard]
 
 # Other dependencies.
+arrow
 click
 httpx
+python-dateutil
 safir>=2.0
 structlog
+pydantic
+markdown-it-py[linkify,plugins]
+pyyaml
+mdformat
+mdformat-gfm
+gidgethub
 
 # Temporary to avoid a conflict with requirements/dev.txt due to the requests
 # dependency on idna, which is capped at 2.10.

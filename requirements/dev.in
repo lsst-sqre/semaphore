@@ -15,6 +15,7 @@ pytest-asyncio
 pytest-cov
 pytest-httpx
 pytest-xdist[psutil]
+types-python-dateutil
 types-PyYAML
 
 # Documentation

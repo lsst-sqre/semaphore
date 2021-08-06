@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -32,3 +33,9 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     """Return an ``httpx.AsyncClient`` configured to talk to the test app."""
     async with AsyncClient(app=app, base_url="https://example.com/") as client:
         yield client
+
+
+@pytest.fixture
+def broadcasts_dir() -> Path:
+    """Directory containing test broadcast markdown messages."""
+    return Path(__file__).parent.joinpath("data/broadcasts")
