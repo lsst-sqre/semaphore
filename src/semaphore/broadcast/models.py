@@ -33,14 +33,12 @@ class Scheduler(ABC):
     @abstractmethod
     def is_active(self) -> bool:
         """Tests if the scheduled event is active."""
-        raise NotImplementedError()
 
     @abstractmethod
     def has_future_events(self) -> bool:
         """Tests if the schedule includes a future event (not including the
         current event).
         """
-        raise NotImplementedError()
 
     def is_stale(self) -> bool:
         """True, if the event is neither active or in the future."""
