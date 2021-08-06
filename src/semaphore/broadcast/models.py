@@ -55,16 +55,12 @@ class PermaScheduler(Scheduler):
         return False
 
 
+@dataclass(frozen=True)
 class FixedExpirationScheduler(Scheduler):
     """A scheduler that is active from now until a fixed date."""
 
-    def __init__(self, end: arrow.Arrow) -> None:
-        self._end = end
-
-    @property
-    def end(self) -> arrow.Arrow:
-        """The end date."""
-        return self._end
+    end: arrow.Arrow
+    """The end date."""
 
     def is_active(self) -> bool:
         return arrow.utcnow() < self.end
@@ -73,15 +69,12 @@ class FixedExpirationScheduler(Scheduler):
         return False
 
 
+@dataclass(frozen=True)
 class OpenEndedScheduler(Scheduler):
     """A scheduler that has a fixed start time, but no end time."""
 
-    def __init__(self, start: arrow.Arrow) -> None:
-        self._start = start
-
-    @property
-    def start(self) -> arrow.Arrow:
-        return self._start
+    start: arrow.Arrow
+    """The start date."""
 
     def is_active(self) -> bool:
         return arrow.utcnow() >= self.start
@@ -93,20 +86,15 @@ class OpenEndedScheduler(Scheduler):
             return False
 
 
+@dataclass(frozen=True)
 class OneTimeScheduler(Scheduler):
-    """A scheduler for a single, fixed, time window.
+    """A scheduler for a single, fixed, time window."""
 
-    Parameters
-    ----------
-    start : `arrow.Arrow`
-        A start date as an arrow object.
-    end : `arrow.Arrow`
-        An end date as an arrow object.
-    """
+    start: arrow.Arrow
+    """The start date."""
 
-    def __init__(self, start: arrow.Arrow, end: arrow.Arrow) -> None:
-        self._start = start
-        self._end = end
+    end: arrow.Arrow
+    """The end date."""
 
     @classmethod
     def from_ttl(
@@ -128,15 +116,6 @@ class OneTimeScheduler(Scheduler):
         """
         end = start.shift(seconds=ttl.total_seconds())
         return cls(start, end)
-
-    @property
-    def start(self) -> arrow.Arrow:
-        """The start date."""
-        return self._start
-
-    @property
-    def end(self) -> arrow.Arrow:
-        return self._end
 
     def is_active(self) -> bool:
         return arrow.utcnow().is_between(self.start, self.end, bounds="[)")
