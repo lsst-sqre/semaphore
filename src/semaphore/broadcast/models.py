@@ -220,7 +220,14 @@ class RecurringScheduler(Scheduler):
             self._start = candidate_start
 
     def _propose(self, after: arrow.Arrow) -> Tuple[arrow.Arrow, arrow.Arrow]:
-        """Propose a new start/end time after the given time."""
+        """Propose a new start/end time after the given time.
+
+        Raises
+        ------
+        ValueError
+            Raised if a start/end time can't be proposed based on the
+            rule set.
+        """
         candidate_start = self.rruleset.after(after, inc=False)
         if candidate_start is None:
             raise ValueError
