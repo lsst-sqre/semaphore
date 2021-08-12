@@ -2,6 +2,11 @@
 Change log
 ##########
 
+0.2.1 (2021-08-12)
+==================
+
+This release prevents the ``/v1/broadcasts`` endpoint from showing disabled messages.
+
 0.2.0 (2021-08-06)
 ==================
 

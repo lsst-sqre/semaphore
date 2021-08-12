@@ -39,3 +39,13 @@ def create_stale_message(identifier: str) -> BroadcastMessage:
         body_md=None,
         scheduler=FixedExpirationScheduler(end),
     )
+
+
+def create_disabled_message(identifier: str) -> BroadcastMessage:
+    return BroadcastMessage(
+        identifier=identifier,
+        summary_md="I'm not enabled right now.",
+        enabled=False,
+        body_md=None,
+        scheduler=PermaScheduler(),
+    )

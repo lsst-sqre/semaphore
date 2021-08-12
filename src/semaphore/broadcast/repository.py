@@ -105,7 +105,7 @@ class BroadcastMessageRepository:
         scheduler.
         """
         for message in self.iter():
-            if message.scheduler.is_active():
+            if message.active:
                 yield message
 
     def iter_stale(self) -> Iterator[BroadcastMessage]:
@@ -113,7 +113,7 @@ class BroadcastMessageRepository:
         active and will not be scheduled in the future.
         """
         for message in self.iter():
-            if message.scheduler.is_stale():
+            if message.stale:
                 yield message
 
     def iter_pending(self) -> Iterator[BroadcastMessage]:
