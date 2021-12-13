@@ -350,17 +350,17 @@ pytest-cov==3.0.0 \
     --hash=sha256:578d5d15ac4a25e5f961c938b85a05b09fdaae9deef3bb6de9a6e766622ca7a6 \
     --hash=sha256:e7f0f5b1617d2210a2cabc266dfe2f4c75a8d32fb89eafb7ad9d06f6d076d470
     # via -r requirements/dev.in
-pytest-forked==1.3.0 \
-    --hash=sha256:6aa9ac7e00ad1a539c41bec6d21011332de671e938c7637378ec9710204e37ca \
-    --hash=sha256:dc4147784048e70ef5d437951728825a131b81714b398d5d52f17c7c144d8815
+pytest-forked==1.4.0 \
+    --hash=sha256:8b67587c8f98cbbadfdd804539ed5455b6ed03802203485dd2f53c1422d7440e \
+    --hash=sha256:bbbb6717efc886b9d64537b41fb1497cfaf3c9601276be8da2cccfea5a3c8ad8
     # via pytest-xdist
 pytest-httpx==0.15.0 \
     --hash=sha256:0702f0308d8a618d399283c241e63d74beea7043102eaf6f879e247b8b7fd372 \
     --hash=sha256:69659833fa79ad5966de40e933766469d294e57ad61a8ce1ce6b05d32091be78
     # via -r requirements/dev.in
-pytest-xdist[psutil]==2.4.0 \
-    --hash=sha256:7b61ebb46997a0820a263553179d6d1e25a8c50d8a8620cd1aa1e20e3be99168 \
-    --hash=sha256:89b330316f7fc475f999c81b577c2b926c9569f3d397ae432c0c2e2496d61ff9
+pytest-xdist[psutil]==2.5.0 \
+    --hash=sha256:4580deca3ff04ddb2ac53eba39d76cb5dd5edeac050cb6fbc768b0dd712b4edf \
+    --hash=sha256:6fe5c74fec98906deb8f2d2b616b5c782022744978e7bd4695d39c8f42d0ce65
     # via -r requirements/dev.in
 pytz==2021.3 \
     --hash=sha256:3672058bc3453457b622aab7a1c3bfd5ab0bdae451512f6cf25f64ed37f5b87c \
@@ -517,9 +517,9 @@ urllib3==1.26.7 \
     # via requests
 
 # The following packages are considered to be unsafe in a requirements file:
-setuptools==59.5.0 \
-    --hash=sha256:6d10741ff20b89cd8c6a536ee9dc90d3002dec0226c78fb98605bfb9ef8a7adf \
-    --hash=sha256:d144f85102f999444d06f9c0e8c737fd0194f10f2f7e5fdb77573f6e2fa4fad0
+setuptools==59.6.0 \
+    --hash=sha256:22c7348c6d2976a52632c67f7ab0cdf40147db7789f9aed18734643fe9cf3373 \
+    --hash=sha256:4ce92f1e1f8f01233ee9952c04f6b81d1e02939d6e1b488428154974a4d0783e
     # via
     #   -c requirements/main.txt
     #   sphinx
