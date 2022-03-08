@@ -9,7 +9,6 @@
 fastapi
 aiofiles
 fastapi-sqlalchemy
-gunicorn
 python-multipart
 starlette
 uvicorn[standard]
@@ -27,7 +26,3 @@ pyyaml
 mdformat
 mdformat-gfm
 gidgethub
-
-# Temporary to avoid a conflict with requirements/dev.txt due to the requests
-# dependency on idna, which is capped at 2.10.
-idna<=2.10
