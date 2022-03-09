@@ -14,12 +14,11 @@
 #   - Sets up additional supporting scripts.
 #   - Configures gunicorn.
 
-FROM tiangolo/uvicorn-gunicorn:python3.8-slim as base-image
+FROM python:3.10.2-slim-bullseye as base-image
 
 # Update system packages
 COPY scripts/install-base-packages.sh .
-RUN ./install-base-packages.sh
-RUN rm ./install-base-packages.sh
+RUN ./install-base-packages.sh && rm ./install-base-packages.sh
 
 FROM base-image AS dependencies-image
 
@@ -45,31 +44,26 @@ FROM dependencies-image AS install-image
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install the Python application.
-COPY . /app
-WORKDIR /app
+COPY . /workdir
+WORKDIR /workdir
 RUN pip install --no-cache-dir .
 
 FROM base-image AS runtime-image
 
-# Copy the virtualenv.
+# Create a non-root user
+RUN useradd --create-home appuser
+
+# Copy the virtualenv
 COPY --from=install-image /opt/venv /opt/venv
 
 # Make sure we use the virtualenv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy over the prestart script that handles database setup.
-# COPY scripts/prestart.sh /app/prestart.sh
+# Switch to the non-root user.
+USER appuser
 
-# We use a module name other than app, so tell the base image that.  This
-# does not copy the app into /app as is recommended by the base Docker
-# image documentation and instead relies on the module search path as
-# modified by the virtualenv.
-ENV MODULE_NAME=semaphore.main
+# Expose the port.
+EXPOSE 8080
 
-# Limit to 1 because of the current in-memory data persistence for broadcasts.
-# Once persistent storage is added, change this to 10 which works well with
-# the Cloud SQL Postgres server.
-ENV MAX_WORKERS=1
-
-# Run on port 8080 instead of the FastAPI default for backward compatibility.
-ENV PORT=8080
+# Run the application.
+CMD ["uvicorn", "semaphore.main:app", "--host", "0.0.0.0", "--port", "8080"]
