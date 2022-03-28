@@ -55,7 +55,7 @@ jobs:
 
       - name: Cache tox environments
         id: cache-tox
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: .tox
           # requirements/*.txt and tox.ini have versioning or dependency
