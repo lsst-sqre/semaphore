@@ -88,6 +88,7 @@ def test_evergreen(broadcasts_dir: Path) -> None:
     assert broadcast.identifier == source_path
     assert broadcast.active is True
     assert broadcast.stale is False
+    assert broadcast.category == "maintenance"
 
 
 def test_evergreen_no_body(broadcasts_dir: Path) -> None:
@@ -119,6 +120,32 @@ def test_evergreen_disabled(broadcasts_dir: Path) -> None:
     broadcast = md.to_broadcast()
     assert broadcast.active is False
     assert broadcast.scheduler.is_active() is True
+
+
+def test_evergreen_info(broadcasts_dir: Path) -> None:
+    source_path = "evergreen-info.md"
+    text = broadcasts_dir.joinpath(source_path).read_text()
+
+    expected_summary = "Informational markdown-formatted broadcast message."
+    expected_body = (
+        "The extended message body, shown *only* when the user interacts "
+        "with the message, and formatted as markdown.\n"
+    )
+
+    md = BroadcastMarkdown(text, source_path)
+    assert md.text == text
+    assert md.metadata.summary == expected_summary
+    assert md.metadata.env is None
+    assert md.body == expected_body
+
+    broadcast = md.to_broadcast()
+    assert isinstance(broadcast.scheduler, PermaScheduler)
+    assert broadcast.summary_md == expected_summary
+    assert broadcast.body_md == expected_body
+    assert broadcast.identifier == source_path
+    assert broadcast.active is True
+    assert broadcast.stale is False
+    assert broadcast.category == "info"
 
 
 def test_env_list(broadcasts_dir: Path) -> None:

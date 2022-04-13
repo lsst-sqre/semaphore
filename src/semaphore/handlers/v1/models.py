@@ -2,23 +2,20 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from markdown_it import MarkdownIt
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-if TYPE_CHECKING:
-    from semaphore.broadcast.models import BroadcastMessage
+from semaphore.broadcast.models import BroadcastCategory, BroadcastMessage
 
 
 class FormattedText(BaseModel):
     """Text that is formatted in both markdown and HTML."""
 
-    gfm: str
-    """The GitHub-flavored Markdown version of the text."""
+    gfm: str = Field(title="The GitHub-flavored Markdown-formatted text.")
 
-    html: str
-    """The HTML-formatted version of the text."""
+    html: str = Field(title="The HTML-formatted text.")
 
     @classmethod
     def from_gfm(cls, gfm_text: str, inline: bool = False) -> FormattedText:
@@ -47,25 +44,35 @@ class FormattedText(BaseModel):
 class BroadcastMessageModel(BaseModel):
     """A broadcast message."""
 
-    id: str
-    """The message's identifier."""
+    id: str = Field(title="The message's identifier")
 
-    summary: FormattedText
-    """The message summary."""
+    summary: FormattedText = Field(title="The message summary")
 
-    body: Optional[FormattedText]
-    """The body content (optional)."""
+    body: Optional[FormattedText] = Field(title="The body content (optional).")
 
-    active: bool
-    """True if the message should be broadcast based on its schedule and
-    being enabled.
-    """
+    active: bool = Field(
+        title="Whether the message should be displayed",
+        description=(
+            "True if the message should be broadcast based on its schedule "
+            "and being enabled."
+        ),
+    )
 
-    enabled: bool
-    """A toggle that, when false, disables a message even if scheduled."""
+    enabled: bool = Field(
+        title="Toggle for whether the message is enabled",
+        description=(
+            "When false, the message isn't shown even if it is scheduled"
+        ),
+    )
 
-    stale: bool
-    """True if the message has not future scheduled broadcast events."""
+    stale: bool = Field(
+        title="Flag indicated the message is stable",
+        description=(
+            "True if the message has no future scheduled broadcast events."
+        ),
+    )
+
+    category: BroadcastCategory = Field(title="Category of the message.")
 
     @classmethod
     def from_broadcast_message(
@@ -95,4 +102,5 @@ class BroadcastMessageModel(BaseModel):
             active=message.active,
             enabled=message.enabled,
             stale=message.stale,
+            category=message.category,
         )
