@@ -20,6 +20,7 @@ from mdit_py_plugins.front_matter import front_matter_plugin
 from pydantic import BaseModel, root_validator, validator
 
 from .models import (
+    BroadcastCategory,
     BroadcastMessage,
     FixedExpirationScheduler,
     OneTimeScheduler,
@@ -155,6 +156,7 @@ class BroadcastMarkdown:
             body_md=self.body,
             scheduler=self._make_scheduler(),
             enabled=self.metadata.enabled,
+            category=self.metadata.category,
         )
 
     def _make_scheduler(self) -> Scheduler:
@@ -563,6 +565,9 @@ class BroadcastMarkdownFrontMatter(BaseModel):
 
     enabled: bool = True
     """Toggle to disable a message, overriding the scheduling."""
+
+    category: BroadcastCategory = BroadcastCategory.maintenance
+    """Broadcast category."""
 
     @root_validator(pre=True)
     def propagate_timezone(

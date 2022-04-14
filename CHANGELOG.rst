@@ -2,6 +2,17 @@
 Change log
 ##########
 
+0.3.0 (2022-04-14)
+==================
+
+- Broadcast messages can now have a "category," which you can set in the YAML front-matter.
+  The default behavior is ``category: maintenance``, which matches the idiomatic use of broadcasts up to this point.
+  However, you can also set ``category: info`` to publish informational messages, like general announcements.
+  The category is present in the JSON data model for broadcasts published from the API.
+  Note that "category" is an enumeration: only ``info`` or ``maintenance`` are allowed values.
+- Semaphore is now cross-published to the GitHub Container Registry, ``ghcr.io/lsst-sqre/semaphore``.
+- Semaphore now runs on Python 3.10.
+
 0.2.1 (2021-08-12)
 ==================
 

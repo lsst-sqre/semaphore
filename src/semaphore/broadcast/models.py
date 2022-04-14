@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING
 
 import arrow
@@ -23,7 +24,18 @@ __all__ = [
     "OneTimeScheduler",
     "OpenEndedScheduler",
     "FixedExpirationScheduler",
+    "BroadcastCategory",
 ]
+
+
+class BroadcastCategory(str, Enum):
+    """Broadcast message categories."""
+
+    maintenance: str = "maintenance"
+    """System maintenance event messages."""
+
+    info: str = "info"
+    """Information message (marketing, announcements, etc.)."""
 
 
 class Scheduler(ABC):
@@ -264,6 +276,11 @@ class BroadcastMessage:
 
     enabled: bool = True
     """A toggle for disabling a message, overriding the scheduler."""
+
+    category: BroadcastCategory = BroadcastCategory.maintenance
+    """The broadcast's content category, such as ``info`` or
+    ``maintenance``.
+    """
 
     @property
     def active(self) -> bool:
