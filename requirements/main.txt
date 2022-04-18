@@ -15,8 +15,6 @@ arrow==1.2.2
     # via -r requirements/main.in
 asgiref==3.5.0
     # via uvicorn
-attrs==21.4.0
-    # via markdown-it-py
 certifi==2021.10.8
     # via
     #   httpcore
@@ -31,7 +29,7 @@ click==8.1.2
     #   uvicorn
 cryptography==36.0.2
     # via pyjwt
-fastapi==0.75.1
+fastapi==0.75.2
     # via
     #   -r requirements/main.in
     #   safir
@@ -59,7 +57,7 @@ idna==3.3
     #   rfc3986
 linkify-it-py==1.0.3
     # via markdown-it-py
-markdown-it-py[linkify,plugins]==2.0.1
+markdown-it-py[linkify,plugins]==2.1.0
     # via
     #   -r requirements/main.in
     #   mdformat
@@ -128,7 +126,7 @@ structlog==21.5.0
     #   safir
 tomli==2.0.1
     # via mdformat
-typing-extensions==4.1.1
+typing-extensions==4.2.0
     # via pydantic
 uc-micro-py==1.0.1
     # via linkify-it-py
@@ -140,5 +138,5 @@ uvloop==0.16.0
     # via uvicorn
 watchgod==0.8.2
     # via uvicorn
-websockets==10.2
+websockets==10.3
     # via uvicorn
