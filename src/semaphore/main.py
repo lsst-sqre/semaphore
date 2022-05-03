@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from importlib.metadata import metadata
+from importlib.metadata import version
 
 import structlog
 from fastapi import FastAPI
@@ -36,7 +36,7 @@ app = FastAPI(
         "Semaphore is developed at [https://github.com/lsst-sqre/semaphore]"
         "(https://github.com/lsst-sqre/semaphore)"
     ),
-    version=metadata("semaphore").get("Version", "0.0.0"),
+    version=version("semaphore"),
     docs_url=f"/{config.name}/docs",
     redoc_url=f"/{config.name}/redoc",
     openapi_url=f"/{config.name}/openapi.json",
