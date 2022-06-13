@@ -75,7 +75,7 @@ lsst-sphinx-bootstrap-theme==0.2.2
     # via -r requirements/dev.in
 markupsafe==2.1.1
     # via jinja2
-mypy==0.960
+mypy==0.961
     # via -r requirements/dev.in
 mypy-extensions==0.4.3
     # via mypy
@@ -126,7 +126,7 @@ pyyaml==6.0
     #   -c requirements/main.txt
     #   documenteer
     #   pybtex
-requests==2.27.1
+requests==2.28.0
     # via
     #   documenteer
     #   sphinx
