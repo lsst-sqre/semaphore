@@ -14,9 +14,9 @@ asgi-lifespan==1.0.1
     # via -r requirements/dev.in
 attrs==21.4.0
     # via pytest
-babel==2.10.1
+babel==2.10.3
     # via sphinx
-certifi==2022.5.18.1
+certifi==2022.6.15
     # via
     #   -c requirements/main.txt
     #   httpcore
@@ -150,7 +150,7 @@ sniffio==1.2.0
     #   httpx
 snowballstemmer==2.2.0
     # via sphinx
-sphinx==5.0.1
+sphinx==5.0.2
     # via
     #   documenteer
     #   sphinx-automodapi
