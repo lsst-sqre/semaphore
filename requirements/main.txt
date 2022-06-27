@@ -10,11 +10,9 @@ anyio==3.6.1
     # via
     #   httpcore
     #   starlette
-    #   watchgod
+    #   watchfiles
 arrow==1.2.2
     # via -r requirements/main.in
-asgiref==3.5.2
-    # via uvicorn
 certifi==2022.6.15
     # via
     #   httpcore
@@ -110,7 +108,7 @@ sniffio==1.2.0
     #   anyio
     #   httpcore
     #   httpx
-sqlalchemy==1.4.37
+sqlalchemy==1.4.39
     # via fastapi-sqlalchemy
 starlette==0.19.1
     # via
@@ -130,11 +128,11 @@ uc-micro-py==1.0.1
     # via linkify-it-py
 uritemplate==4.1.1
     # via gidgethub
-uvicorn[standard]==0.17.6
+uvicorn[standard]==0.18.1
     # via -r requirements/main.in
 uvloop==0.16.0
     # via uvicorn
-watchgod==0.8.2
+watchfiles==0.15.0
     # via uvicorn
 websockets==10.3
     # via uvicorn
