@@ -17,7 +17,7 @@ certifi==2022.6.15
     # via
     #   httpcore
     #   httpx
-cffi==1.15.0
+cffi==1.15.1
     # via cryptography
 click==8.1.3
     # via
@@ -122,13 +122,13 @@ structlog==21.5.0
     #   safir
 tomli==2.0.1
     # via mdformat
-typing-extensions==4.2.0
+typing-extensions==4.3.0
     # via pydantic
 uc-micro-py==1.0.1
     # via linkify-it-py
 uritemplate==4.1.1
     # via gidgethub
-uvicorn[standard]==0.18.1
+uvicorn[standard]==0.18.2
     # via -r requirements/main.in
 uvloop==0.16.0
     # via uvicorn
