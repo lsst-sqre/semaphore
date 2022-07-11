@@ -31,7 +31,7 @@ click==8.1.3
     #   sphinx-click
 coverage[toml]==6.4.1
     # via pytest-cov
-documenteer==0.6.11
+documenteer==0.6.12
     # via -r requirements/dev.in
 docutils==0.18.1
     # via
@@ -158,7 +158,7 @@ sphinx==5.0.2
     #   sphinxcontrib-bibtex
 sphinx-automodapi==0.14.1
     # via -r requirements/dev.in
-sphinx-click==4.2.0
+sphinx-click==4.3.0
     # via -r requirements/dev.in
 sphinxcontrib-applehelp==1.0.2
     # via sphinx
@@ -188,5 +188,5 @@ typing-extensions==4.3.0
     # via
     #   -c requirements/main.txt
     #   mypy
-urllib3==1.26.9
+urllib3==1.26.10
     # via requests
