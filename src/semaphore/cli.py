@@ -2,26 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
-from functools import wraps
 from typing import TYPE_CHECKING
 
 import click
 
 if TYPE_CHECKING:
-    from typing import Any, Awaitable, Callable, TypeVar, Union
-
-    T = TypeVar("T")
+    from typing import Union
 
 __all__ = ["main", "help"]
-
-
-def coroutine(f: Callable[..., Awaitable[T]]) -> Callable[..., T]:
-    @wraps(f)
-    def wrapper(*args: Any, **kwargs: Any) -> T:
-        return asyncio.run(f(*args, **kwargs))
-
-    return wrapper
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})

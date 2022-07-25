@@ -33,7 +33,7 @@ coverage[toml]==6.4.2
     # via pytest-cov
 documenteer==0.6.12
     # via -r requirements/dev.in
-docutils==0.18.1
+docutils==0.19
     # via
     #   pybtex-docutils
     #   sphinx
@@ -75,7 +75,7 @@ lsst-sphinx-bootstrap-theme==0.2.2
     # via -r requirements/dev.in
 markupsafe==2.1.1
     # via jinja2
-mypy==0.961
+mypy==0.971
     # via -r requirements/dev.in
 mypy-extensions==0.4.3
     # via mypy
@@ -150,7 +150,7 @@ sniffio==1.2.0
     #   httpx
 snowballstemmer==2.2.0
     # via sphinx
-sphinx==5.0.2
+sphinx==5.1.0
     # via
     #   documenteer
     #   sphinx-automodapi
@@ -180,13 +180,13 @@ tomli==2.0.1
     #   coverage
     #   mypy
     #   pytest
-types-python-dateutil==2.8.18
+types-python-dateutil==2.8.19
     # via -r requirements/dev.in
-types-pyyaml==6.0.10
+types-pyyaml==6.0.11
     # via -r requirements/dev.in
 typing-extensions==4.3.0
     # via
     #   -c requirements/main.txt
     #   mypy
-urllib3==1.26.10
+urllib3==1.26.11
     # via requests
