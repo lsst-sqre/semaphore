@@ -14,7 +14,7 @@ repos:
         name: Check rST
         files: (README\.rst)|(CHANGELOG\.rst)
 
-  - repo: https://github.com/pycqa/isort
+  - repo: https://github.com/PyCQA/isort
     rev: 5.10.1
     hooks:
       - id: isort
@@ -33,7 +33,7 @@ repos:
         additional_dependencies: [black==20.8b1]
         args: [-l, '79', -t, py38]
 
-  - repo: https://gitlab.com/pycqa/flake8
-    rev: 4.0.1
+  - repo: https://github.com/PyCQA/flake8
+    rev: 5.0.2
     hooks:
       - id: flake8
