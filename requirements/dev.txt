@@ -119,7 +119,7 @@ pytest-httpx==0.21.0
     # via -r requirements/dev.in
 pytest-xdist[psutil]==2.5.0
     # via -r requirements/dev.in
-pytz==2022.1
+pytz==2022.2.1
     # via babel
 pyyaml==6.0
     # via

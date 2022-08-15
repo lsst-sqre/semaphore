@@ -72,11 +72,11 @@ mdit-py-plugins==0.3.0
     # via
     #   markdown-it-py
     #   mdformat-gfm
-mdurl==0.1.1
+mdurl==0.1.2
     # via markdown-it-py
 pycparser==2.21
     # via cffi
-pydantic==1.9.1
+pydantic==1.9.2
     # via
     #   -r requirements/main.in
     #   fastapi
@@ -108,7 +108,7 @@ sniffio==1.2.0
     #   anyio
     #   httpcore
     #   httpx
-sqlalchemy==1.4.39
+sqlalchemy==1.4.40
     # via fastapi-sqlalchemy
 starlette==0.19.1
     # via
