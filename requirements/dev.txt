@@ -16,7 +16,7 @@ attrs==22.1.0
     # via pytest
 babel==2.10.3
     # via sphinx
-certifi==2022.6.15
+certifi==2022.6.15.1
     # via
     #   -c requirements/main.txt
     #   httpcore
