@@ -16,7 +16,7 @@ attrs==22.1.0
     # via pytest
 babel==2.10.3
     # via sphinx
-certifi==2022.6.15.1
+certifi==2022.9.14
     # via
     #   -c requirements/main.txt
     #   httpcore
@@ -57,7 +57,7 @@ httpx==0.23.0
     # via
     #   -c requirements/main.txt
     #   pytest-httpx
-idna==3.3
+idna==3.4
     # via
     #   -c requirements/main.txt
     #   anyio
