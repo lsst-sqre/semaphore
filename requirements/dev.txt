@@ -29,7 +29,7 @@ click==8.1.3
     #   -c requirements/main.txt
     #   documenteer
     #   sphinx-click
-coverage[toml]==6.4.4
+coverage[toml]==6.5.0
     # via pytest-cov
 documenteer==0.6.14
     # via -r requirements/dev.in
@@ -75,7 +75,7 @@ lsst-sphinx-bootstrap-theme==0.2.2
     # via -r requirements/dev.in
 markupsafe==2.1.1
     # via jinja2
-mypy==0.971
+mypy==0.981
     # via -r requirements/dev.in
 mypy-extensions==0.4.3
     # via mypy
@@ -111,7 +111,7 @@ pytest==7.1.3
     #   pytest-xdist
 pytest-asyncio==0.19.0
     # via -r requirements/dev.in
-pytest-cov==3.0.0
+pytest-cov==4.0.0
     # via -r requirements/dev.in
 pytest-forked==1.4.0
     # via pytest-xdist
@@ -119,7 +119,7 @@ pytest-httpx==0.21.0
     # via -r requirements/dev.in
 pytest-xdist[psutil]==2.5.0
     # via -r requirements/dev.in
-pytz==2022.2.1
+pytz==2022.4
     # via babel
 pyyaml==6.0
     # via
@@ -150,7 +150,7 @@ sniffio==1.3.0
     #   httpx
 snowballstemmer==2.2.0
     # via sphinx
-sphinx==5.2.1
+sphinx==5.2.3
     # via
     #   documenteer
     #   sphinx-automodapi
@@ -182,7 +182,7 @@ tomli==2.0.1
     #   pytest
 types-python-dateutil==2.8.19
     # via -r requirements/dev.in
-types-pyyaml==6.0.11
+types-pyyaml==6.0.12
     # via -r requirements/dev.in
 typing-extensions==4.3.0
     # via
