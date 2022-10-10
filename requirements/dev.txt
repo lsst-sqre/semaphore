@@ -43,7 +43,7 @@ execnet==1.9.0
     # via pytest-xdist
 gitdb==4.0.9
     # via gitpython
-gitpython==3.1.27
+gitpython==3.1.28
     # via documenteer
 h11==0.12.0
     # via
@@ -75,7 +75,7 @@ lsst-sphinx-bootstrap-theme==0.2.2
     # via -r requirements/dev.in
 markupsafe==2.1.1
     # via jinja2
-mypy==0.981
+mypy==0.982
     # via -r requirements/dev.in
 mypy-extensions==0.4.3
     # via mypy
@@ -184,7 +184,7 @@ types-python-dateutil==2.8.19
     # via -r requirements/dev.in
 types-pyyaml==6.0.12
     # via -r requirements/dev.in
-typing-extensions==4.3.0
+typing-extensions==4.4.0
     # via
     #   -c requirements/main.txt
     #   mypy
