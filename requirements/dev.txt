@@ -6,7 +6,7 @@
 #
 alabaster==0.7.12
     # via sphinx
-anyio==3.6.1
+anyio==3.6.2
     # via
     #   -c requirements/main.txt
     #   httpcore
@@ -31,7 +31,7 @@ click==8.1.3
     #   sphinx-click
 coverage[toml]==6.5.0
     # via pytest-cov
-documenteer==0.6.14
+documenteer==0.7.0
     # via -r requirements/dev.in
 docutils==0.19
     # via
@@ -85,7 +85,7 @@ packaging==21.3
     #   sphinx
 pluggy==1.0.0
     # via pytest
-psutil==5.9.2
+psutil==5.9.3
     # via pytest-xdist
 py==1.11.0
     # via
@@ -97,6 +97,10 @@ pybtex==0.24.0
     #   sphinxcontrib-bibtex
 pybtex-docutils==1.0.2
     # via sphinxcontrib-bibtex
+pydantic==1.10.2
+    # via
+    #   -c requirements/main.txt
+    #   documenteer
 pygments==2.13.0
     # via sphinx
 pyparsing==3.0.9
@@ -109,17 +113,17 @@ pytest==7.1.3
     #   pytest-forked
     #   pytest-httpx
     #   pytest-xdist
-pytest-asyncio==0.19.0
+pytest-asyncio==0.20.1
     # via -r requirements/dev.in
 pytest-cov==4.0.0
     # via -r requirements/dev.in
 pytest-forked==1.4.0
     # via pytest-xdist
-pytest-httpx==0.21.0
+pytest-httpx==0.21.1
     # via -r requirements/dev.in
 pytest-xdist[psutil]==2.5.0
     # via -r requirements/dev.in
-pytz==2022.4
+pytz==2022.5
     # via babel
 pyyaml==6.0
     # via
@@ -178,9 +182,10 @@ tomli==2.0.1
     # via
     #   -c requirements/main.txt
     #   coverage
+    #   documenteer
     #   mypy
     #   pytest
-types-python-dateutil==2.8.19.1
+types-python-dateutil==2.8.19.2
     # via -r requirements/dev.in
 types-pyyaml==6.0.12
     # via -r requirements/dev.in
@@ -188,5 +193,6 @@ typing-extensions==4.4.0
     # via
     #   -c requirements/main.txt
     #   mypy
+    #   pydantic
 urllib3==1.26.12
     # via requests
