@@ -39,6 +39,8 @@ docutils==0.19
     #   sphinx
     #   sphinx-click
     #   sphinxcontrib-bibtex
+exceptiongroup==1.0.0
+    # via pytest
 execnet==1.9.0
     # via pytest-xdist
 gitdb==4.0.9
@@ -87,10 +89,6 @@ pluggy==1.0.0
     # via pytest
 psutil==5.9.3
     # via pytest-xdist
-py==1.11.0
-    # via
-    #   pytest
-    #   pytest-forked
 pybtex==0.24.0
     # via
     #   pybtex-docutils
@@ -105,23 +103,20 @@ pygments==2.13.0
     # via sphinx
 pyparsing==3.0.9
     # via packaging
-pytest==7.1.3
+pytest==7.2.0
     # via
     #   -r requirements/dev.in
     #   pytest-asyncio
     #   pytest-cov
-    #   pytest-forked
     #   pytest-httpx
     #   pytest-xdist
 pytest-asyncio==0.20.1
     # via -r requirements/dev.in
 pytest-cov==4.0.0
     # via -r requirements/dev.in
-pytest-forked==1.4.0
-    # via pytest-xdist
 pytest-httpx==0.21.1
     # via -r requirements/dev.in
-pytest-xdist[psutil]==2.5.0
+pytest-xdist[psutil]==3.0.2
     # via -r requirements/dev.in
 pytz==2022.5
     # via babel
@@ -187,7 +182,7 @@ tomli==2.0.1
     #   pytest
 types-python-dateutil==2.8.19.2
     # via -r requirements/dev.in
-types-pyyaml==6.0.12
+types-pyyaml==6.0.12.1
     # via -r requirements/dev.in
 typing-extensions==4.4.0
     # via
