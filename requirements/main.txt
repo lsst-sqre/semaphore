@@ -23,9 +23,9 @@ click==8.1.3
     # via
     #   -r requirements/main.in
     #   uvicorn
-cryptography==38.0.1
+cryptography==38.0.3
     # via pyjwt
-fastapi==0.85.1
+fastapi==0.86.0
     # via
     #   -r requirements/main.in
     #   safir
@@ -33,7 +33,7 @@ fastapi-sqlalchemy==0.2.1
     # via -r requirements/main.in
 gidgethub==5.2.1
     # via -r requirements/main.in
-greenlet==1.1.3.post0
+greenlet==2.0.0.post0
     # via sqlalchemy
 h11==0.12.0
     # via
@@ -108,7 +108,7 @@ sniffio==1.3.0
     #   anyio
     #   httpcore
     #   httpx
-sqlalchemy==1.4.42
+sqlalchemy==1.4.43
     # via fastapi-sqlalchemy
 starlette==0.20.4
     # via
