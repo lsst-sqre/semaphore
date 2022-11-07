@@ -14,7 +14,7 @@ asgi-lifespan==1.0.1
     # via -r requirements/dev.in
 attrs==22.1.0
     # via pytest
-babel==2.10.3
+babel==2.11.0
     # via sphinx
 certifi==2022.9.24
     # via
@@ -39,7 +39,7 @@ docutils==0.19
     #   sphinx
     #   sphinx-click
     #   sphinxcontrib-bibtex
-exceptiongroup==1.0.0
+exceptiongroup==1.0.1
     # via pytest
 execnet==1.9.0
     # via pytest-xdist
@@ -114,11 +114,11 @@ pytest-asyncio==0.20.1
     # via -r requirements/dev.in
 pytest-cov==4.0.0
     # via -r requirements/dev.in
-pytest-httpx==0.21.1
+pytest-httpx==0.21.2
     # via -r requirements/dev.in
 pytest-xdist[psutil]==3.0.2
     # via -r requirements/dev.in
-pytz==2022.5
+pytz==2022.6
     # via babel
 pyyaml==6.0
     # via
