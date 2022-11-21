@@ -35,15 +35,15 @@ gidgethub==5.2.1
     # via -r requirements/main.in
 greenlet==2.0.1
     # via sqlalchemy
-h11==0.12.0
+h11==0.14.0
     # via
     #   httpcore
     #   uvicorn
-httpcore==0.15.0
+httpcore==0.16.1
     # via httpx
 httptools==0.5.0
     # via uvicorn
-httpx==0.23.0
+httpx==0.23.1
     # via
     #   -r requirements/main.in
     #   safir
@@ -116,7 +116,7 @@ starlette==0.21.0
     #   fastapi
     #   fastapi-sqlalchemy
     #   safir
-structlog==22.1.0
+structlog==22.2.0
     # via
     #   -r requirements/main.in
     #   safir
@@ -128,7 +128,7 @@ uc-micro-py==1.0.1
     # via linkify-it-py
 uritemplate==4.1.1
     # via gidgethub
-uvicorn[standard]==0.19.0
+uvicorn[standard]==0.20.0
     # via -r requirements/main.in
 uvloop==0.17.0
     # via uvicorn

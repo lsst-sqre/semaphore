@@ -39,7 +39,7 @@ docutils==0.19
     #   sphinx
     #   sphinx-click
     #   sphinxcontrib-bibtex
-exceptiongroup==1.0.2
+exceptiongroup==1.0.4
     # via pytest
 execnet==1.9.0
     # via pytest-xdist
@@ -47,15 +47,15 @@ gitdb==4.0.9
     # via gitpython
 gitpython==3.1.29
     # via documenteer
-h11==0.12.0
+h11==0.14.0
     # via
     #   -c requirements/main.txt
     #   httpcore
-httpcore==0.15.0
+httpcore==0.16.1
     # via
     #   -c requirements/main.txt
     #   httpx
-httpx==0.23.0
+httpx==0.23.1
     # via
     #   -c requirements/main.txt
     #   pytest-httpx
@@ -77,7 +77,7 @@ lsst-sphinx-bootstrap-theme==0.2.2
     # via -r requirements/dev.in
 markupsafe==2.1.1
     # via jinja2
-mypy==0.990
+mypy==0.991
     # via -r requirements/dev.in
 mypy-extensions==0.4.3
     # via mypy
@@ -180,7 +180,7 @@ tomli==2.0.1
     #   documenteer
     #   mypy
     #   pytest
-types-python-dateutil==2.8.19.3
+types-python-dateutil==2.8.19.4
     # via -r requirements/dev.in
 types-pyyaml==6.0.12.2
     # via -r requirements/dev.in
