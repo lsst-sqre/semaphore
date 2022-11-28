@@ -43,7 +43,7 @@ exceptiongroup==1.0.4
     # via pytest
 execnet==1.9.0
     # via pytest-xdist
-gitdb==4.0.9
+gitdb==4.0.10
     # via gitpython
 gitpython==3.1.29
     # via documenteer
@@ -51,7 +51,7 @@ h11==0.14.0
     # via
     #   -c requirements/main.txt
     #   httpcore
-httpcore==0.16.1
+httpcore==0.16.2
     # via
     #   -c requirements/main.txt
     #   httpx
@@ -189,5 +189,5 @@ typing-extensions==4.4.0
     #   -c requirements/main.txt
     #   mypy
     #   pydantic
-urllib3==1.26.12
+urllib3==1.26.13
     # via requests
