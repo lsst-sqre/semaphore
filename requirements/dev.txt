@@ -16,7 +16,7 @@ attrs==22.1.0
     # via pytest
 babel==2.11.0
     # via sphinx
-certifi==2022.9.24
+certifi==2022.12.7
     # via
     #   -c requirements/main.txt
     #   httpcore
@@ -81,7 +81,7 @@ mypy==0.991
     # via -r requirements/dev.in
 mypy-extensions==0.4.3
     # via mypy
-packaging==21.3
+packaging==22.0
     # via
     #   pytest
     #   sphinx
@@ -101,8 +101,6 @@ pydantic==1.10.2
     #   documenteer
 pygments==2.13.0
     # via sphinx
-pyparsing==3.0.9
-    # via packaging
 pytest==7.2.0
     # via
     #   -r requirements/dev.in
@@ -110,7 +108,7 @@ pytest==7.2.0
     #   pytest-cov
     #   pytest-httpx
     #   pytest-xdist
-pytest-asyncio==0.20.2
+pytest-asyncio==0.20.3
     # via -r requirements/dev.in
 pytest-cov==4.0.0
     # via -r requirements/dev.in
@@ -157,7 +155,7 @@ sphinx==5.3.0
     #   sphinxcontrib-bibtex
 sphinx-automodapi==0.14.1
     # via -r requirements/dev.in
-sphinx-click==4.3.0
+sphinx-click==4.4.0
     # via -r requirements/dev.in
 sphinxcontrib-applehelp==1.0.2
     # via sphinx
