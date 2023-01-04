@@ -20,14 +20,12 @@ __all__ = ["Config", "Profile", "LogLevel"]
 
 
 class Profile(str, Enum):
-
     production = "production"
 
     development = "development"
 
 
 class LogLevel(str, Enum):
-
     DEBUG = "DEBUG"
 
     INFO = "INFO"
@@ -40,7 +38,6 @@ class LogLevel(str, Enum):
 
 
 class Config(BaseSettings):
-
     name: str = Field("semaphore", env="SAFIR_NAME")
 
     profile: Profile = Field(Profile.production, env="SAFIR_PROFILE")
