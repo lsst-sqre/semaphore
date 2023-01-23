@@ -87,7 +87,7 @@ python-dateutil==2.8.2
     # via
     #   -r requirements/main.in
     #   arrow
-python-dotenv==0.21.0
+python-dotenv==0.21.1
     # via uvicorn
 python-multipart==0.0.5
     # via -r requirements/main.in
