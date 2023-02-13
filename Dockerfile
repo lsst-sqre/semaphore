@@ -14,7 +14,7 @@
 #   - Sets up additional supporting scripts.
 #   - Configures gunicorn.
 
-FROM python:3.11.1-slim-bullseye as base-image
+FROM python:3.11.2-slim-bullseye as base-image
 
 # Update system packages
 COPY scripts/install-base-packages.sh .
