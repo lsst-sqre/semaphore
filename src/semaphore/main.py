@@ -44,23 +44,23 @@ app = FastAPI(
 app.include_router(internal_router)
 app.include_router(external_router)
 app.include_router(v1_router)
+app.add_middleware(XForwardedMiddleware)
+
+# This CORS policy is quite liberal. When the API becomes writeable we'll
+# need to revisit this.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins="*",
+    allow_credentials=False,
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 
 @app.on_event("startup")
 async def startup_event() -> None:
     logger = structlog.get_logger(config.logger_name)
     logger.info("Running startup")
-
-    app.add_middleware(XForwardedMiddleware)
-    # This CORS policy is quite liberal. When the API becomes writeable we'll
-    # need to revisit this.
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins="*",
-        allow_credentials=False,
-        allow_methods=["GET"],
-        allow_headers=["*"],
-    )
 
     broadcast_repo = await broadcast_repo_dependency()
     if config.enable_github_app:
