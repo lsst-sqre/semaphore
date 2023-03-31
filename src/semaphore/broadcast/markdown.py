@@ -142,6 +142,20 @@ class BroadcastMarkdown:
         else:
             return False
 
+    def summarize(
+        self, summary: Optional[str], body: Optional[str]
+    ) -> tuple[Optional[str], Optional[str]]:
+        if body is not None and summary is None:
+            paragraphs = body.split("\n\n")
+            new_summary = paragraphs[0]
+
+            del paragraphs[0]
+            new_body = "\n\n".join(paragraphs)
+            return new_summary, new_body
+
+        else:
+            return summary, body
+
     def to_broadcast(self) -> BroadcastMessage:
         """Export a BroadcastMessage from the markdown content.
 
@@ -150,10 +164,15 @@ class BroadcastMarkdown:
         `semaphore.broadcast.data.BroadcastMessage`
             The broadcast message.
         """
+
+        new_summary, new_body = self.summarize(
+            self.metadata.summary, self.body
+        )
+
         return BroadcastMessage(
             identifier=self.identifier,
-            summary_md=self.metadata.summary,
-            body_md=self.body,
+            summary_md=new_summary,
+            body_md=new_body,
             scheduler=self._make_scheduler(),
             enabled=self.metadata.enabled,
             category=self.metadata.category,
@@ -534,8 +553,12 @@ class BroadcastMarkdownFrontMatter(BaseModel):
     message.
     """
 
-    summary: str
-    """Broadcast summary message."""
+    summary: Optional[str] = None
+    """Broadcast summary message.
+
+    If not set, summary will be set to None then default to the first
+    paragraph of the body.
+    """
 
     env: Optional[List[str]] = None
     """The list of applicable environments. None implies that the broadcast
