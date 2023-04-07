@@ -142,11 +142,9 @@ class BroadcastMarkdown:
         else:
             return False
 
-    def summarize(
-        self, summary: Optional[str], body: Optional[str]
-    ) -> tuple[Optional[str], Optional[str]]:
-        if body is not None and summary is None:
-            paragraphs = body.split("\n\n")
+    def extract_content(self) -> tuple[str, Optional[str]]:
+        if self.body is not None and self.metadata.summary is None:
+            paragraphs = self.body.split("\n\n")
             new_summary = paragraphs[0]
 
             del paragraphs[0]
@@ -154,7 +152,11 @@ class BroadcastMarkdown:
             return new_summary, new_body
 
         else:
-            return summary, body
+            if self.metadata.summary is None:
+                raise RuntimeError(
+                    "Summary metadata must be set if body is empty"
+                )
+            return self.metadata.summary, self.body
 
     def to_broadcast(self) -> BroadcastMessage:
         """Export a BroadcastMessage from the markdown content.
@@ -165,14 +167,12 @@ class BroadcastMarkdown:
             The broadcast message.
         """
 
-        new_summary, new_body = self.summarize(
-            self.metadata.summary, self.body
-        )
+        summary, body = self.extract_content()
 
         return BroadcastMessage(
             identifier=self.identifier,
-            summary_md=new_summary,
-            body_md=new_body,
+            summary_md=summary,
+            body_md=body,
             scheduler=self._make_scheduler(),
             enabled=self.metadata.enabled,
             category=self.metadata.category,
