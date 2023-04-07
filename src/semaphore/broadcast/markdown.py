@@ -142,21 +142,38 @@ class BroadcastMarkdown:
         else:
             return False
 
-    def extract_content(self) -> tuple[str, Optional[str]]:
-        if self.body is not None and self.metadata.summary is None:
-            paragraphs = self.body.split("\n\n")
-            new_summary = paragraphs[0]
+    def extract_content(self, getSummary: bool) -> str | None:
+        if self.body is None:
+            raise RuntimeError("No body provided")
 
-            del paragraphs[0]
-            new_body = "\n\n".join(paragraphs)
-            return new_summary, new_body
+        paragraphs = self.body.split("\n\n")
+        new_summary = paragraphs[0]
 
+        del paragraphs[0]
+        new_body = "\n\n".join(paragraphs)
+
+        if getSummary:
+            return new_summary
         else:
-            if self.metadata.summary is None:
-                raise RuntimeError(
-                    "Summary metadata must be set if body is empty"
-                )
-            return self.metadata.summary, self.body
+            return new_body
+
+    @property
+    def extracted_summary(self) -> str:
+        content = self.extract_content(True)
+
+        if content is None:
+            raise RuntimeError("No summary found")
+
+        return content
+
+    @property
+    def extracted_body(self) -> str | None:
+        content = self.extract_content(False)
+
+        if content == "":
+            return None
+        else:
+            return content
 
     def to_broadcast(self) -> BroadcastMessage:
         """Export a BroadcastMessage from the markdown content.
@@ -167,12 +184,24 @@ class BroadcastMarkdown:
             The broadcast message.
         """
 
-        summary, body = self.extract_content()
+        if self.body is not None and self.metadata.summary is None:
+            new_summary = self.extracted_summary
+
+            new_body = self.extracted_body
+        else:
+            if self.metadata.summary is None:
+                raise RuntimeError(
+                    "Summary metadata must be set if body is empty"
+                )
+
+            new_summary = self.metadata.summary
+
+            new_body = self.body
 
         return BroadcastMessage(
             identifier=self.identifier,
-            summary_md=summary,
-            body_md=body,
+            summary_md=new_summary,
+            body_md=new_body,
             scheduler=self._make_scheduler(),
             enabled=self.metadata.enabled,
             category=self.metadata.category,
