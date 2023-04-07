@@ -1,6 +1,4 @@
 ---
-summary: |
-  System maintenance is happening now, 3pm-5pm Pacific / 22:00-00:00 UT.
 env: idfprod
 ttl: 2hr
 timezone: America/Los Angeles
@@ -10,5 +8,7 @@ rules:
     by_weekday:
       - day: thursday
 ---
+
+System maintenance is happening now, 3pm-5pm Pacific / 22:00-00:00 UT.
 
 *What is RSP Patch Thursday?)*](https://community.lsst.org/t/what-is-rsp-patch-thursday/5647)
