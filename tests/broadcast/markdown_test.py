@@ -127,21 +127,26 @@ def test_evergreen_info(broadcasts_dir: Path) -> None:
     text = broadcasts_dir.joinpath(source_path).read_text()
 
     expected_summary = "Informational markdown-formatted broadcast message."
-    expected_body = (
+    expected_body_pre = (
+        "Informational markdown-formatted broadcast message.\n\n"
+        "The extended message body, shown *only* when the user interacts "
+        "with the message, and formatted as markdown.\n"
+    )
+    expected_body_post = (
         "The extended message body, shown *only* when the user interacts "
         "with the message, and formatted as markdown.\n"
     )
 
     md = BroadcastMarkdown(text, source_path)
     assert md.text == text
-    assert md.metadata.summary == expected_summary
+    assert md.metadata.summary is None
     assert md.metadata.env is None
-    assert md.body == expected_body
+    assert md.body == expected_body_pre
 
     broadcast = md.to_broadcast()
     assert isinstance(broadcast.scheduler, PermaScheduler)
     assert broadcast.summary_md == expected_summary
-    assert broadcast.body_md == expected_body
+    assert broadcast.body_md == expected_body_post
     assert broadcast.identifier == source_path
     assert broadcast.active is True
     assert broadcast.stale is False
@@ -153,19 +158,24 @@ def test_env_list(broadcasts_dir: Path) -> None:
     text = broadcasts_dir.joinpath(source_path).read_text()
 
     expected_summary = "The markdown-formatted broadcast message."
-    expected_body = (
+    expected_body_pre = (
+        "The markdown-formatted broadcast message.\n\n"
+        "The extended message body, shown *only* when the user interacts "
+        "with the message, and formatted as markdown.\n"
+    )
+    expected_body_post = (
         "The extended message body, shown *only* when the user interacts "
         "with the message, and formatted as markdown.\n"
     )
 
     md = BroadcastMarkdown(text, source_path)
-    assert md.metadata.summary == expected_summary
+    assert md.metadata.summary is None
     assert md.metadata.env == ["idfprod", "stable"]
-    assert md.body == expected_body
+    assert md.body == expected_body_pre
 
     broadcast = md.to_broadcast()
     assert broadcast.summary_md == expected_summary
-    assert broadcast.body_md == expected_body
+    assert broadcast.body_md == expected_body_post
     assert broadcast.identifier == source_path
     assert broadcast.active is True
     assert broadcast.stale is False
@@ -176,22 +186,52 @@ def test_env_string(broadcasts_dir: Path) -> None:
     text = broadcasts_dir.joinpath(source_path).read_text()
 
     expected_summary = "The markdown-formatted broadcast message."
-    expected_body = (
+    expected_body_pre = (
+        "The markdown-formatted broadcast message.\n\n"
+        "The extended message body, shown *only* when the user interacts "
+        "with the message, and formatted as markdown.\n"
+    )
+    expected_body_post = (
         "The extended message body, shown *only* when the user interacts "
         "with the message, and formatted as markdown.\n"
     )
 
     md = BroadcastMarkdown(text, source_path)
-    assert md.metadata.summary == expected_summary
+    assert md.metadata.summary is None
     assert md.metadata.env == ["idfprod"]
-    assert md.body == expected_body
+    assert md.body == expected_body_pre
 
     broadcast = md.to_broadcast()
     assert broadcast.summary_md == expected_summary
-    assert broadcast.body_md == expected_body
+    assert broadcast.body_md == expected_body_post
     assert broadcast.identifier == source_path
     assert broadcast.active is True
     assert broadcast.stale is False
+
+
+def test_summary(broadcasts_dir: Path) -> None:
+    source_path = "summary.md"
+    text = broadcasts_dir.joinpath(source_path).read_text()
+
+    expected_summary = (
+        "There is no summary here,\njust a couple of title lines"
+    )
+    expected_body_pre = (
+        "There is no summary here,\njust a couple of title "
+        "lines\n\nHere's some body text!\n\nMore body text\n"
+    )
+    expected_body_post = "Here's some body text!\n\nMore body text\n"
+
+    md = BroadcastMarkdown(text, source_path)
+    assert md.text == text
+    assert md.metadata.summary is None
+    assert md.body == expected_body_pre
+
+    broadcast = md.to_broadcast()
+
+    assert broadcast.summary_md == expected_summary
+    assert broadcast.body_md == expected_body_post
+    assert broadcast.identifier == source_path
 
 
 def test_defer_expire(broadcasts_dir: Path) -> None:
@@ -199,19 +239,24 @@ def test_defer_expire(broadcasts_dir: Path) -> None:
     text = broadcasts_dir.joinpath(source_path).read_text()
 
     expected_summary = "The markdown-formatted broadcast message."
-    expected_body = (
+    expected_body_pre = (
+        "The markdown-formatted broadcast message.\n\n"
+        "The extended message body, shown *only* when the user interacts "
+        "with the message, and formatted as markdown.\n"
+    )
+    expected_body_post = (
         "The extended message body, shown *only* when the user interacts "
         "with the message, and formatted as markdown.\n"
     )
 
     md = BroadcastMarkdown(text, source_path)
-    assert md.metadata.summary == expected_summary
+    assert md.metadata.summary is None
     assert md.metadata.env is None
-    assert md.body == expected_body
+    assert md.body == expected_body_pre
 
     broadcast = md.to_broadcast()
     assert broadcast.summary_md == expected_summary
-    assert broadcast.body_md == expected_body
+    assert broadcast.body_md == expected_body_post
     assert broadcast.identifier == source_path
     assert broadcast.active is False
     assert broadcast.stale is True
@@ -229,17 +274,18 @@ def test_defer_expire_fuzzy(broadcasts_dir: Path) -> None:
     source_path = "defer-expire-fuzzy.md"
     text = broadcasts_dir.joinpath(source_path).read_text()
 
-    expected_summary = "The markdown-formatted broadcast message."
-    expected_body = None
+    expected_summary = "The markdown-formatted broadcast message.\n"
+    expected_body_pre = "The markdown-formatted broadcast message.\n"
+    expected_body_post = None
 
     md = BroadcastMarkdown(text, source_path)
-    assert md.metadata.summary == expected_summary
+    assert md.metadata.summary is None
     assert md.metadata.env is None
-    assert md.body == expected_body
+    assert md.body == expected_body_pre
 
     broadcast = md.to_broadcast()
     assert broadcast.summary_md == expected_summary
-    assert broadcast.body_md == expected_body
+    assert broadcast.body_md == expected_body_post
     assert broadcast.identifier == source_path
     assert broadcast.active is False
     assert broadcast.stale is True

@@ -142,6 +142,39 @@ class BroadcastMarkdown:
         else:
             return False
 
+    def extract_content(self, getSummary: bool) -> str | None:
+        if self.body is None:
+            raise RuntimeError("No body provided")
+
+        paragraphs = self.body.split("\n\n")
+        new_summary = paragraphs[0]
+
+        del paragraphs[0]
+        new_body = "\n\n".join(paragraphs)
+
+        if getSummary:
+            return new_summary
+        else:
+            return new_body
+
+    @property
+    def extracted_summary(self) -> str:
+        content = self.extract_content(True)
+
+        if content is None:
+            raise RuntimeError("No summary found")
+
+        return content
+
+    @property
+    def extracted_body(self) -> str | None:
+        content = self.extract_content(False)
+
+        if content == "":
+            return None
+        else:
+            return content
+
     def to_broadcast(self) -> BroadcastMessage:
         """Export a BroadcastMessage from the markdown content.
 
@@ -150,10 +183,25 @@ class BroadcastMarkdown:
         `semaphore.broadcast.data.BroadcastMessage`
             The broadcast message.
         """
+
+        if self.body is not None and self.metadata.summary is None:
+            new_summary = self.extracted_summary
+
+            new_body = self.extracted_body
+        else:
+            if self.metadata.summary is None:
+                raise RuntimeError(
+                    "Summary metadata must be set if body is empty"
+                )
+
+            new_summary = self.metadata.summary
+
+            new_body = self.body
+
         return BroadcastMessage(
             identifier=self.identifier,
-            summary_md=self.metadata.summary,
-            body_md=self.body,
+            summary_md=new_summary,
+            body_md=new_body,
             scheduler=self._make_scheduler(),
             enabled=self.metadata.enabled,
             category=self.metadata.category,
@@ -534,8 +582,12 @@ class BroadcastMarkdownFrontMatter(BaseModel):
     message.
     """
 
-    summary: str
-    """Broadcast summary message."""
+    summary: Optional[str] = None
+    """Broadcast summary message.
+
+    If not set, summary will be set to None then default to the first
+    paragraph of the body.
+    """
 
     env: Optional[List[str]] = None
     """The list of applicable environments. None implies that the broadcast
