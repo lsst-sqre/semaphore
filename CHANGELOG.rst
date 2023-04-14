@@ -2,6 +2,11 @@
 Change log
 ##########
 
+0.4.0 (2023-04-14)
+==================
+
+- Summaries will now be interpreted using the first provided body paragraph unless defined in the `summary` property in the post metadata
+
 0.3.0 (2022-04-14)
 ==================
 
