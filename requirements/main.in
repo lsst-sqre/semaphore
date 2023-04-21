@@ -18,7 +18,7 @@ arrow
 click
 httpx
 python-dateutil
-safir>=2.0
+safir[arq,redis]>=4.0
 structlog
 pydantic
 markdown-it-py[linkify,plugins]
