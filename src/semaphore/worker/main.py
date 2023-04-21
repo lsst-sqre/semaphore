@@ -12,7 +12,7 @@ from safir.logging import configure_logging
 from semaphore.config import config
 from semaphore.dependencies.redis import redis_dependency
 
-from .functions import ping
+from .functions import ping, send_message
 
 
 async def startup(ctx: Dict[Any, Any]) -> None:
@@ -60,12 +60,12 @@ class WorkerSettings:
     See `arq.worker.Worker` for details on these attributes.
     """
 
-    functions = [
-        ping,
-    ]
+    functions = [ping, send_message]
 
     redis_settings = config.arq_redis_settings
 
     on_startup = startup
 
     on_shutdown = shutdown
+
+    send_message("test 1 2")

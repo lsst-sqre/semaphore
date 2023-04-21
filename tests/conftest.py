@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import pytest_asyncio
+import structlog
 from asgi_lifespan import LifespanManager
 from httpx import AsyncClient
 
@@ -40,3 +41,15 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
 def broadcasts_dir() -> Path:
     """Directory containing test broadcast markdown messages."""
     return Path(__file__).parent.joinpath("data/broadcasts")
+
+
+@pytest.fixture
+def worker_context() -> dict[Any, Any]:
+    """A mock ctx (context) fixture for arq workers."""
+    ctx: dict[Any, Any] = {}
+
+    # Prep logger
+    logger = structlog.get_logger("semaphore")
+    ctx["logger"] = logger
+
+    return ctx
