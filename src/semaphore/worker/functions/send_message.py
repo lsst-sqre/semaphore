@@ -16,7 +16,9 @@ async def send_message(ctx: Dict[Any, Any], message: str) -> None:
     logger.info("Running send_message")
 
     logger = structlog.get_logger(__name__)
-    client = SlackWebhookClient(config.slack_webhook_url.get_secret_value(), "Semaphore", logger)
+    client = SlackWebhookClient(
+        config.slack_webhook_url.get_secret_value(), "Semaphore", logger
+    )
 
     slack_message = SlackMessage(message=message)
     await client.post(slack_message)

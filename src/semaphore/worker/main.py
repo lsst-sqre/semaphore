@@ -14,6 +14,8 @@ from semaphore.dependencies.redis import redis_dependency
 
 from .functions import ping, send_message
 
+# from safir.slack.webhook import SlackWebhookClient
+
 
 async def startup(ctx: Dict[Any, Any]) -> None:
     """Runs during working start-up to set up the worker context."""
@@ -31,6 +33,12 @@ async def startup(ctx: Dict[Any, Any]) -> None:
 
     http_client = httpx.AsyncClient()
     ctx["http_client"] = http_client
+
+    # logger = structlog.get_logger(__name__)
+    # client = SlackWebhookClient(config.slack_webhook_url.get_secret_value(),
+    #  "Semaphore", logger)
+
+    # ctx["webhook_client", client]
 
     ctx["logger"] = logger
     logger.info("Start up complete")
@@ -67,5 +75,3 @@ class WorkerSettings:
     on_startup = startup
 
     on_shutdown = shutdown
-
-    send_message("test 1 2")
