@@ -167,13 +167,13 @@ coverage[toml]==7.2.5 \
     --hash=sha256:f81c9b4bd8aa747d417407a7f6f0b1469a43b36a85748145e144ac4e8d303cb5 \
     --hash=sha256:f99ef080288f09ffc687423b8d60978cf3a465d3f404a18d1a05474bd8575a47
     # via pytest-cov
-documenteer==0.7.3 \
-    --hash=sha256:484112cdc4ec621793e5c7a6bf2c1cf7ea5544514e16eba005ef18d296a10b9d \
-    --hash=sha256:74aac4b33e0fb24a41b51e90b85a4d665c54ddc68034d674eba3847688b1b32e
+documenteer==0.7.4 \
+    --hash=sha256:afa46f2a42ef1843228a612a5e60870a1d974189372d2b7e6656fb723fb07df9 \
+    --hash=sha256:c8b59592e16e14f6f96230a1db7a786e09085e01b5b690c1eab970265c6d2881
     # via -r requirements/dev.in
-docutils==0.20 \
-    --hash=sha256:a428f10de4de4774389734c986a01b4af2d802d26717108b0f1b9356862937c5 \
-    --hash=sha256:f75a5a52fbcacd81b47e42888ad2b380748aaccfb3f13af0fe69deb759f01eb6
+docutils==0.20.1 \
+    --hash=sha256:96f387a2c5562db4476f09f13bbab2192e764cac08ebbf3a34a95d9b1e4a59d6 \
+    --hash=sha256:f08a4e276c3a1583a86dce3e34aba3fe04d02bba2dd51ed16106244e8a923e3b
     # via
     #   pybtex-docutils
     #   sphinx
@@ -197,15 +197,15 @@ h11==0.14.0 \
     # via
     #   -c requirements/main.txt
     #   httpcore
-httpcore==0.17.0 \
-    --hash=sha256:0fdfea45e94f0c9fd96eab9286077f9ff788dd186635ae61b312693e4d943599 \
-    --hash=sha256:cc045a3241afbf60ce056202301b4d8b6af08845e3294055eb26b09913ef903c
+httpcore==0.17.1 \
+    --hash=sha256:628e768aaeec1f7effdc6408ba1c3cdbd7487c1fc570f7d66844ec4f003e1ca4 \
+    --hash=sha256:caf508597c525f9b8bfff187e270666309f63115af30f7d68b16143a403c8356
     # via
     #   -c requirements/main.txt
     #   httpx
-httpx==0.24.0 \
-    --hash=sha256:447556b50c1921c351ea54b4fe79d91b724ed2b027462ab9a329465d147d5a4e \
-    --hash=sha256:507d676fc3e26110d41df7d35ebd8b3b8585052450f4097401c9be59d928c63e
+httpx==0.24.1 \
+    --hash=sha256:06781eb9ac53cde990577af654bd990a4949de37a28bdb4a230d434f3a30b9bd \
+    --hash=sha256:5853a43053df830c20f8110c5e69fe44d035d850b2dfe795e196f00fdb774bdd
     # via
     #   -c requirements/main.txt
     #   pytest-httpx
@@ -421,9 +421,9 @@ pytest-httpx==0.22.0 \
     --hash=sha256:3a82797f3a9a14d51e8c6b7fa97524b68b847ee801109c062e696b4744f4431c \
     --hash=sha256:cefb7dcf66a4cb0601b0de05e576cca423b6081f3245e7912a4d84c58fa3eae8
     # via -r requirements/dev.in
-pytest-xdist[psutil]==3.3.0 \
-    --hash=sha256:76f7683d4f993eaff91c9cb0882de0465c4af9c6dd3debc903833484041edc1a \
-    --hash=sha256:d42c9efb388da35480878ef4b2993704c6cea800c8bafbe85a8cdc461baf0748
+pytest-xdist[psutil]==3.3.1 \
+    --hash=sha256:d5ee0520eb1b7bcca50a60a518ab7a7707992812c578198f8b44fdfac78e8c93 \
+    --hash=sha256:ff9daa7793569e6a68544850fd3927cd257cc03a7ef76c95e86915355e82b5f2
     # via -r requirements/dev.in
 pyyaml==6.0 \
     --hash=sha256:01b45c0191e6d66c470b6cf1b9531a771a83c1c4208272ead47a3ae4f2f603bf \
