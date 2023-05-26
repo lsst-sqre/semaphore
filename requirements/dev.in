@@ -19,7 +19,5 @@ types-python-dateutil
 types-PyYAML
 
 # Documentation
-documenteer
-lsst-sphinx-bootstrap-theme<0.3
-sphinx-automodapi
+documenteer[guide]
 sphinx-click
