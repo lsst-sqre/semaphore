@@ -3,7 +3,7 @@
 name = "semaphore"
 description = "Semaphore is the user messaging system for the Rubin Science Platform."
 license = { file = "LICENSE" }
-readme = "README.rst"
+readme = "README.md"
 keywords = ["rubin", "lsst"]
 # https://pypi.org/classifiers/
 classifiers = [
