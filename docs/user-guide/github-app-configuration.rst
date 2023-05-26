@@ -15,7 +15,7 @@ To learn more about installing GitHub Apps in general, see the `GitHub Apps docu
     For example, if the source repository is `lsst-sqre/rsp_broadcast`_, the GitHub App must be created in the ``lsst-sqre`` organization.
 
     **Do not create a public GitHub App.**
-    If the GitHub App is public, it can be installed in any GitHub organization or user.
+    If the GitHub App is public, it can be installed in any GitHub organization or user account.
     Semaphore does not yet support an "accept" list to ensure that only authorized organizations or users can install a public GitHub App.
 
 Create an app with a template URL
@@ -66,10 +66,11 @@ Not applicable.
 Webhook
 -------
 
-The webhook should be enabled. Set the webhook URL to the ``/semaphore/github/webhook`` endpoint in the RSP/Phalanx environment.
-For example ``https://data.lsst.cloud/semaphore/github/webhook``.
+The webhook should be enabled.
+Set the webhook URL to the ``/semaphore/github/webhook`` endpoint in the RSP/Phalanx environment.
+For example, ``https://data.lsst.cloud/semaphore/github/webhook``.
 
-Create a webhook secret and store it in the :envvar:`SEMAPHORE_GITHUB_WEBHOOK_SECRET` environment variable (though Vault/1Password).
+Create a webhook secret and store it in the :envvar:`SEMAPHORE_GITHUB_WEBHOOK_SECRET` environment variable (through Vault/1Password).
 
 Permissions
 -----------
@@ -93,14 +94,14 @@ The GitHub App needs to subscribe to the following events:
 Create the app and secrets
 ==========================
 
-Once the GitHub App is configured, you can click the "Create GitHub App" button to create it in your GitHub organization or user account.
+Once the GitHub App is configured, you can click the :guilabel:`Create GitHub App` button to create it in your GitHub organization or user account.
 
 When you do this, you can create the secret keys that Semaphore needs to authenticate with GitHub and verify webhook events.
 These are provided to Semaphore as environment variables:
 
-- :envvar:`SEMAPHORE_GITHUB_APP_ID`: The GitHub App ID. This is shown on the GitHub App's "General" page under the "About" heading.
-- :envvar:`SEMAPHORE_GITHUB_APP_PRIVATE_KEY`: The GitHub App's private key. This is shown on the GitHub App's "General" page under "Client secrets".
-- :envvar:`SEMAPHORE_GITHUB_WEBHOOK_SECRET`: The webhook secret you created in the GitHub App's "General" page under "Webhooks".
+- :envvar:`SEMAPHORE_GITHUB_APP_ID`: The GitHub App ID. This is shown on the GitHub App's :guilabel:`General` page under the :guilabel:`About` heading.
+- :envvar:`SEMAPHORE_GITHUB_APP_PRIVATE_KEY`: The GitHub App's private key. This is shown on the GitHub App's :guilabel:`General` page under :guilabel:`Client secrets`.
+- :envvar:`SEMAPHORE_GITHUB_WEBHOOK_SECRET`: The webhook secret you created in the GitHub App's :guilabel:`General` page under :guilabel:`Webhooks`.
 
 See :doc:`environment-variables` for more information on Phalanx's environment variable settings.
 
@@ -108,7 +109,5 @@ Install the app in the source repository
 ========================================
 
 Once the app is created and the Semaphore app is configured, you need to *install* the app in the source repository (or repositories, if there are several).
-From the app's GitHub settings page, click "Install App" and select the repositories to install it in.
+From the app's GitHub settings page, click :guilabel:`Install App` and select the repositories to install it in.
 Avoid installing the app in repositories that do not use Semaphore.
-
-.. _lsst-sqre/rsp_broadcast: https://github.com/lsst-sqre/rsp_broadcast
