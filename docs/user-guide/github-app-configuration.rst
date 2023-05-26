@@ -69,7 +69,7 @@ Webhook
 The webhook should be enabled. Set the webhook URL to the ``/semaphore/github/webhook`` endpoint in the RSP/Phalanx environment.
 For example ``https://data.lsst.cloud/semaphore/github/webhook``.
 
-Create a webhook secret and store it in the ``SEMAPHORE_GITHUB_WEBHOOK_SECRET`` environment variable (though Vault/1Password).
+Create a webhook secret and store it in the :envvar:`SEMAPHORE_GITHUB_WEBHOOK_SECRET` environment variable (though Vault/1Password).
 
 Permissions
 -----------
@@ -88,6 +88,8 @@ The GitHub App needs to subscribe to the following events:
 - Check Run
 - Push
 
+.. _github-app-secrets:
+
 Create the app and secrets
 ==========================
 
@@ -96,9 +98,11 @@ Once the GitHub App is configured, you can click the "Create GitHub App" button 
 When you do this, you can create the secret keys that Semaphore needs to authenticate with GitHub and verify webhook events.
 These are provided to Semaphore as environment variables:
 
-- ``SEMAPHORE_GITHUB_APP_ID``: The GitHub App ID. This is shown on the GitHub App's "General" page under the "About" heading.
-- ``SEMAPHORE_GITHUB_APP_PRIVATE_KEY``: The GitHub App's private key. This is shown on the GitHub App's "General" page under "Client secrets".
-- ``SEMAPHORE_GITHUB_WEBHOOK_SECRET``: The webhook secret you created in the GitHub App's "General" page under "Webhooks".
+- :envvar:`SEMAPHORE_GITHUB_APP_ID`: The GitHub App ID. This is shown on the GitHub App's "General" page under the "About" heading.
+- :envvar:`SEMAPHORE_GITHUB_APP_PRIVATE_KEY`: The GitHub App's private key. This is shown on the GitHub App's "General" page under "Client secrets".
+- :envvar:`SEMAPHORE_GITHUB_WEBHOOK_SECRET`: The webhook secret you created in the GitHub App's "General" page under "Webhooks".
+
+See :doc:`environment-variables` for more information on Phalanx's environment variable settings.
 
 Install the app in the source repository
 ========================================
