@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from importlib.metadata import version
 
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from safir.dependencies.http_client import http_client_dependency
 from safir.logging import configure_logging
 from safir.middleware.x_forwarded import XForwardedMiddleware
@@ -74,3 +76,14 @@ async def startup_event() -> None:
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     await http_client_dependency.aclose()
+
+
+def create_openapi() -> str:
+    """Create the OpenAPI spec for static documentation."""
+    spec = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    return json.dumps(spec)
