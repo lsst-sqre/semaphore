@@ -16,7 +16,7 @@ import dateutil.rrule
 import yaml
 from markdown_it import MarkdownIt
 from mdformat.renderer import MDRenderer
-from mdit_py_plugins.front_matter import front_matter_plugin
+from mdit_py_plugins.front_matter import front_matter_plugin  # type: ignore
 from pydantic import BaseModel, root_validator, validator
 
 from .models import (

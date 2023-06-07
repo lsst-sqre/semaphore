@@ -2,6 +2,14 @@
 Change log
 ##########
 
+Unreleased
+==========
+
+- Documentation improvements:
+
+  - Added documentation for Semaphore's configuration environment variables and how to configure Semaphore's GitHub App integration.
+  - Added a Redoc subsite for the API documentation.
+
 0.4.0 (2023-04-14)
 ==================
 

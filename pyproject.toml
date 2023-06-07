@@ -1,18 +1,44 @@
-[build-system]
-requires = [
-    "setuptools>=42",
-    "wheel",
-    "setuptools_scm[toml]>=3.4",
+[project]
+# https://packaging.python.org/en/latest/specifications/declaring-project-metadata/
+name = "semaphore"
+description = "Semaphore is the user messaging system for the Rubin Science Platform."
+license = { file = "LICENSE" }
+readme = "README.md"
+keywords = ["rubin", "lsst"]
+# https://pypi.org/classifiers/
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Operating System :: POSIX",
+    "Typing :: Typed",
 ]
-build-backend = 'setuptools.build_meta'
+requires-python = ">=3.11"
+# Use requirements/main.in for runtime dependencies instead.
+dependencies = []
+dynamic = ["version"]
+
+[project.scripts]
+example = "semaphore.cli:main"
+
+[project.urls]
+Homepage = "https://semaphore.lsst.io"
+Source = "https://github.com/lsst-sqre/semaphore"
+
+[build-system]
+requires = ["setuptools>=61", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
 
 [tool.coverage.run]
-# If not set, then at the termination of each worker (when using pytest-xdist),
-# the following is traced: "Coverage.py warning: Module semaphore was
-# previously imported, but not measured (module-not-measured)"
-disable_warnings = ["module-not-measured"]
+parallel = true
+branch = true
+source = ["semaphore"]
 
 [tool.coverage.paths]
 source = ["src", ".tox/*/site-packages"]
@@ -28,12 +54,12 @@ exclude_lines = [
     "raise NotImplementedError",
     "if 0:",
     "if __name__ == .__main__.:",
-    "if TYPE_CHECKING:"
+    "if TYPE_CHECKING:",
 ]
 
 [tool.black]
 line-length = 79
-target-version = ["py38"]
+target-version = ["py311"]
 exclude = '''
 /(
     \.eggs
@@ -50,14 +76,38 @@ exclude = '''
 # Multi-line strings are implicitly treated by black as regular expressions
 
 [tool.isort]
-include_trailing_comma = true
-multi_line_output = 3
+profile = "black"
+line_length = 79
 known_first_party = ["semaphore", "tests"]
 skip = ["docs/conf.py"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
-python_files = [
-    "tests/*.py",
-    "tests/*/*.py"
-]
+# The python_files setting is not for test detection (pytest will pick up any
+# test files named *_test.py without this setting) but to enable special
+# assert processing in any non-test supporting files under tests.  We
+# conventionally put test support functions under tests.support and may
+# sometimes use assert in test fixtures in conftest.py, and pytest only
+# enables magical assert processing (showing a full diff on assert failures
+# with complex data structures rather than only the assert message) in files
+# listed in python_files.
+python_files = ["tests/*.py", "tests/*/*.py"]
+
+[tool.mypy]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+ignore_missing_imports = true
+local_partial_types = true
+plugins = ["pydantic.mypy"]
+no_implicit_reexport = true
+show_error_codes = true
+strict_equality = true
+warn_redundant_casts = true
+warn_unreachable = true
+warn_unused_ignores = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+warn_untyped_fields = true
