@@ -19,5 +19,5 @@ types-python-dateutil
 types-PyYAML
 
 # Documentation
-documenteer[guide]
+documenteer[guide]==1.0.0a1
 sphinx-click
