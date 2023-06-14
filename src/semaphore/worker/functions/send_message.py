@@ -8,17 +8,16 @@ import structlog
 from safir.slack.blockkit import SlackMessage
 from safir.slack.webhook import SlackWebhookClient
 
-from semaphore.config import config
 
-
-async def send_message(ctx: Dict[Any, Any], message: str) -> None:
+async def send_message(
+    ctx: Dict[Any, Any], webhook: str, message: str
+) -> SlackMessage:
     logger = ctx["logger"].bind(task="send_message")
     logger.info("Running send_message")
 
     logger = structlog.get_logger(__name__)
-    client = SlackWebhookClient(
-        config.slack_webhook_url.get_secret_value(), "Semaphore", logger
-    )
+    client = SlackWebhookClient(webhook, "Semaphore", logger)
 
     slack_message = SlackMessage(message=message)
     await client.post(slack_message)
+    return slack_message

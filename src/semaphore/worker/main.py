@@ -35,7 +35,7 @@ async def startup(ctx: Dict[Any, Any]) -> None:
     ctx["http_client"] = http_client
 
     # logger = structlog.get_logger(__name__)
-    # client = SlackWebhookClient(config.slack_webhook_url.get_secret_value(),
+    # client = SlackWebhookClient(config.slack_webhook.get_secret_value(),
     #  "Semaphore", logger)
 
     # ctx["webhook_client", client]

@@ -7,11 +7,14 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 import pytest_asyncio
+import respx
 import structlog
 from asgi_lifespan import LifespanManager
 from httpx import AsyncClient
+from safir.testing.slack import MockSlackWebhook, mock_slack_webhook
 
 from semaphore import main
+from semaphore.config import config
 
 if TYPE_CHECKING:
     from typing import AsyncIterator
@@ -53,3 +56,10 @@ def worker_context() -> dict[Any, Any]:
     ctx["logger"] = logger
 
     return ctx
+
+
+@pytest.fixture
+def mock_slack(respx_mock: respx.Router) -> MockSlackWebhook:
+    return mock_slack_webhook(
+        config.slack_webhook.get_secret_value(), respx_mock
+    )

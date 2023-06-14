@@ -87,7 +87,7 @@ class Config(BaseSettings):
     For a list of environments, see https://github.com/lsst-sqre/phalanx.
     """
 
-    slack_webhook_url: Optional[SecretStr] = Field(
+    slack_webhook: Optional[SecretStr] = Field(
         None, env="SEMAPHORE_SLACK_PRIVATE_KEY"
     )
     """The Slack app private key."""
