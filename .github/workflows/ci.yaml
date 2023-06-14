@@ -65,7 +65,11 @@ jobs:
             tox-${{ matrix.python }}-${{ hashFiles('requirements/*.txt') }}-
 
       - name: Run tox
-        run: tox -e py,coverage-report,typing
+        uses: lsst-sqre/run-tox@v1
+        with:
+          python-version: ${{ matrix.python }}
+          tox-envs: 'lint,typing,docker,coverage-report'
+          tox-plugins: "tox-docker"
 
   build:
     runs-on: ubuntu-latest
