@@ -11,8 +11,11 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Any, Mapping, Optional
+from urllib.parse import urlparse
 
-from pydantic import BaseSettings, Field, SecretStr, validator
+from arq.connections import RedisSettings
+from pydantic import BaseSettings, Field, RedisDsn, SecretStr, validator
+from safir.arq import ArqMode
 
 # from safir.logging import configure_logging
 
@@ -84,6 +87,29 @@ class Config(BaseSettings):
     For a list of environments, see https://github.com/lsst-sqre/phalanx.
     """
 
+    slack_webhook_url: Optional[SecretStr] = Field(
+        None, env="SEMAPHORE_SLACK_PRIVATE_KEY"
+    )
+    """The Slack app private key."""
+
+    redis_url: RedisDsn = Field(
+        env="SEMAPHORE_REDIS_URL",
+        default_factory=lambda: RedisDsn(
+            "redis://localhost:6379/0", scheme="redis"
+        ),
+    )
+    """URL for the redis instance, used by the worker queue."""
+
+    redis_queue_url: RedisDsn = Field(
+        env="SEMAPHORE_REDIS_URL",
+        default_factory=lambda: RedisDsn(
+            "redis://localhost:6379/0", scheme="redis"
+        ),
+    )
+    """URL for the redis instance, used by the arq queue."""
+
+    arq_mode: ArqMode = Field(ArqMode.production, env="SEMAPHORE_ARQ_MODE")
+
     @validator("github_webhook_secret", "github_app_private_key", pre=True)
     def validate_none_secret(
         cls, v: Optional[SecretStr]
@@ -122,6 +148,17 @@ class Config(BaseSettings):
             return False
 
         return True
+
+    @property
+    def arq_redis_settings(self) -> RedisSettings:
+        """Create a Redis settings instance for arq."""
+        url_parts = urlparse(self.redis_queue_url)
+        redis_settings = RedisSettings(
+            host=url_parts.hostname or "localhost",
+            port=url_parts.port or 6379,
+            database=int(url_parts.path.lstrip("/")) if url_parts.path else 0,
+        )
+        return redis_settings
 
 
 config = Config()
