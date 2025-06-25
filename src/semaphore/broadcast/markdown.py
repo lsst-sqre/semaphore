@@ -618,7 +618,7 @@ class BroadcastMarkdownFrontMatter(BaseModel):
     enabled: bool = True
     """Toggle to disable a message, overriding the scheduling."""
 
-    category: BroadcastCategory = BroadcastCategory.maintenance
+    category: BroadcastCategory = BroadcastCategory.notice
     """Broadcast category."""
 
     @root_validator(pre=True)

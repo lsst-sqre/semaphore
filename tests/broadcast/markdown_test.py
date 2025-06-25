@@ -88,7 +88,7 @@ def test_evergreen(broadcasts_dir: Path) -> None:
     assert broadcast.identifier == source_path
     assert broadcast.active is True
     assert broadcast.stale is False
-    assert broadcast.category == "maintenance"
+    assert broadcast.category == "notice"
 
 
 def test_evergreen_no_body(broadcasts_dir: Path) -> None:

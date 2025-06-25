@@ -280,7 +280,7 @@ class BroadcastMessage:
     enabled: bool = True
     """A toggle for disabling a message, overriding the scheduler."""
 
-    category: BroadcastCategory = BroadcastCategory.maintenance
+    category: BroadcastCategory = BroadcastCategory.notice
     """The broadcast's content category, such as ``info`` or
     ``maintenance``.
     """
