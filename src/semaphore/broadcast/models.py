@@ -37,6 +37,9 @@ class BroadcastCategory(str, Enum):
     info: str = "info"
     """Information message (marketing, announcements, etc.)."""
 
+    notice: str = "notice"
+    """A notice message about upcoming changes or maintenance."""
+
 
 class Scheduler(ABC):
     """A scheduler for messages."""
