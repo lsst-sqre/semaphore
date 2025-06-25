@@ -31,7 +31,7 @@ __all__ = [
 class BroadcastCategory(str, Enum):
     """Broadcast message categories."""
 
-    maintenance: str = "maintenance"
+    outage: str = "outage"
     """System maintenance event messages."""
 
     info: str = "info"
