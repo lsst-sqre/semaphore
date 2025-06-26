@@ -31,11 +31,14 @@ __all__ = [
 class BroadcastCategory(str, Enum):
     """Broadcast message categories."""
 
-    maintenance: str = "maintenance"
+    outage: str = "outage"
     """System maintenance event messages."""
 
     info: str = "info"
     """Information message (marketing, announcements, etc.)."""
+
+    notice: str = "notice"
+    """A notice message about upcoming changes or maintenance."""
 
 
 class Scheduler(ABC):
@@ -277,7 +280,7 @@ class BroadcastMessage:
     enabled: bool = True
     """A toggle for disabling a message, overriding the scheduler."""
 
-    category: BroadcastCategory = BroadcastCategory.maintenance
+    category: BroadcastCategory = BroadcastCategory.notice
     """The broadcast's content category, such as ``info`` or
     ``maintenance``.
     """

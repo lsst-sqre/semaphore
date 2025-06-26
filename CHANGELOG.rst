@@ -2,8 +2,10 @@
 Change log
 ##########
 
-Unreleased
-==========
+0.5.0 (2024-06-26)
+==================
+
+- Reorganized the broadcast message categories to be: `info`, `notice` (new), and `outage` (new). The old `maintenance` category has been removed and is now equivalent to `notice`.
 
 - Documentation improvements:
 
