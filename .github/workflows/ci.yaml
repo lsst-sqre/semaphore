@@ -1,5 +1,11 @@
 name: CI
 
+env:
+  # Current supported uv version. The uv documentation recommends pinning
+  # this. The version should match the version used in .pre-commit-config.yaml
+  # and frozen in uv.lock. It is updated by make update-deps.
+  UV_VERSION: "0.11.3"
+
 "on":
   merge_group: {}
   pull_request: {}
@@ -19,59 +25,118 @@ name: CI
     types: [published]
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0 # full-depth clone for setuptools_scm
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Run pre-commit
-        uses: pre-commit/action@v3.0.1
-
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
-    strategy:
-      matrix:
-        python:
-          - "3.11"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Run tox
+        run: uv run --only-group=tox tox run -e lint,typing,py,coverage-report
+
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      pull-requests: read
+    outputs:
+      docs: ${{ steps.filter.outputs.docs }}
+      docs-specific: ${{ steps.filter.outputs.docs-specific }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            docs:
+              - "docs/**"
+            docs-specific:
+              - "docs/**"
+
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    needs: changes
+    if: >-
+      (needs.changes.outputs.docs == 'true')
+      || (github.event_name == 'workflow_dispatch')
+      || (github.event_name == 'release' && github.event.action == 'published')
 
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 0 # full-depth clone for setuptools_scm
+          fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
         with:
-          python-version: ${{ matrix.python }}
+          version: ${{ env.UV_VERSION }}
 
-      - name: Install tox
-        run: pip install tox
-
-      - name: Cache tox environments
-        id: cache-tox
-        uses: actions/cache@v5
-        with:
-          path: .tox
-          # requirements/*.txt and tox.ini have versioning or dependency
-          # information that would impact the tox environment.
-          key: tox-${{ matrix.python }}-${{ hashFiles('requirements/*.txt') }}-${{ hashFiles('tox.ini') }}
-          restore-keys: |
-            tox-${{ matrix.python }}-${{ hashFiles('requirements/*.txt') }}-
+      - name: Install extra packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y graphviz imagemagick
 
       - name: Run tox
-        run: tox -e py,coverage-report,typing
+        run: uv run --only-group=tox tox run -e docs
+
+      # Upload docs:
+      # - on pushes to main if *any* documentation content might have changed
+      # - on workflow dispatches
+      # - on pushes to tickets/ branches if docs/ directory content changed
+      - name: Upload to LSST the Docs
+        uses: lsst-sqre/ltd-upload@v1
+        with:
+          project: "semaphore"
+          dir: "docs/_build/html"
+          username: ${{ secrets.LTD_USERNAME }}
+          password: ${{ secrets.LTD_PASSWORD }}
+        if: >-
+          (github.event_name == 'push' && github.ref_name == 'main')
+          || (github.event_name == 'merge_group')
+          || (github.event_name == 'workflow_dispatch')
+          || (github.event_name == 'pull_request'
+              && (startsWith(github.head_ref, 'tickets/')
+                  || startsWith(github.head_ref, 't/'))
+              && steps.filter.outputs.docs-specific == 'true')
+
+  linkcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    needs: changes
+    if: ${{ needs.changes.outputs.docs == 'true' }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Install extra packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y graphviz
+
+      - name: Run tox
+        run: uv run --only-group=tox tox run -e docs-linkcheck
 
   build:
-    needs: [lint, test]
+    needs: [test]
     secrets: inherit
     uses: lsst-sqre/multiplatform-build-and-push/.github/workflows/build.yaml@v3
     with:

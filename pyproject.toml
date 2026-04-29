@@ -11,15 +11,33 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.14",
     "Intended Audience :: Developers",
     "Natural Language :: English",
     "Operating System :: POSIX",
     "Typing :: Typed",
 ]
-requires-python = ">=3.11"
-# Use requirements/main.in for runtime dependencies instead.
-dependencies = []
+requires-python = ">=3.14"
+dependencies = [
+    "aiofiles",
+    "arrow",
+    "click",
+    "fastapi==0.97.0",
+    "fastapi-sqlalchemy",
+    "gidgethub",
+    "httpx",
+    "markdown-it-py[linkify,plugins]<3", # for mdformat compatibility
+    "mdformat",
+    "mdformat-gfm",
+    "pydantic<2",
+    "python-dateutil",
+    "python-multipart",
+    "pyyaml",
+    "safir>=2.0",
+    "starlette==0.27.0",
+    "structlog",
+    "uvicorn[standard]",
+]
 dynamic = ["version"]
 
 [project.scripts]
@@ -30,8 +48,37 @@ Homepage = "https://semaphore.lsst.io"
 Source = "https://github.com/lsst-sqre/semaphore"
 
 [build-system]
-requires = ["setuptools>=61", "wheel", "setuptools_scm[toml]>=6.2"]
+requires = ["setuptools>=61", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "asgi-lifespan",
+    "coverage[toml]>=5.0.2",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "pytest-httpx",
+    "pytest-xdist[psutil]",
+]
+docs = [
+    "documenteer[guide]==1.0.0a1",
+    "sphinx-click",
+]
+lint = [
+    "pre-commit",
+    "pre-commit-uv",
+    "ruff>=0.9",
+]
+tox = [
+    "tox>=4.24",
+    "tox-uv>=1.25",
+]
+typing = [
+    "mypy>=1.19",
+    "types-python-dateutil",
+    "types-pyyaml",
+]
 
 [tool.setuptools_scm]
 

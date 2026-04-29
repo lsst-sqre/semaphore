@@ -155,7 +155,7 @@ async def update_broadcast_repo_from_push_event(
 
 
 def _integrate_file_changes_in_commits(
-    commits: Sequence[Dict[str, Any]]
+    commits: Sequence[Dict[str, Any]],
 ) -> Tuple[Set[str], Set[str]]:
     """Integrate the file changes from the sequence of individual commits
     to determine the overall set of added/modified and removed files.

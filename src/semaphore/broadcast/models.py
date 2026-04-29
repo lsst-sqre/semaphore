@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+import datetime
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import arrow
 
 if TYPE_CHECKING:
-    import datetime
     from typing import Optional, Tuple
 
     import dateutil.rrule
@@ -31,13 +31,13 @@ __all__ = [
 class BroadcastCategory(str, Enum):
     """Broadcast message categories."""
 
-    outage: str = "outage"
+    outage = "outage"
     """System maintenance event messages."""
 
-    info: str = "info"
+    info = "info"
     """Information message (marketing, announcements, etc.)."""
 
-    notice: str = "notice"
+    notice = "notice"
     """A notice message about upcoming changes or maintenance."""
 
 
@@ -242,13 +242,14 @@ class RecurringScheduler(Scheduler):
             Raised if a start/end time can't be proposed based on the
             rule set.
         """
-        candidate_start = self.rruleset.after(after, inc=False)
+        after_datetime = cast(datetime.datetime, after)
+        candidate_start = self.rruleset.after(after_datetime, inc=False)
         if candidate_start is None:
             raise ValueError
         else:
-            candidate_start = arrow.get(candidate_start)
-        candidate_end = candidate_start.shift(seconds=self.ttl_seconds)
-        return (candidate_start, candidate_end)
+            candidate_start_arrow = arrow.get(candidate_start)
+        candidate_end = candidate_start_arrow.shift(seconds=self.ttl_seconds)
+        return (candidate_start_arrow, candidate_end)
 
 
 @dataclass
