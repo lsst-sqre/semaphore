@@ -60,7 +60,8 @@ dev = [
     "pytest-xdist[psutil]",
 ]
 docs = [
-    "documenteer[guide]==1.0.0a1",
+    "documenteer[guide]",
+    "scriv[toml]>=1.5",
     "sphinx-click",
 ]
 lint = [
@@ -160,5 +161,18 @@ extend = "ruff-shared.toml"
 
 [tool.ruff.lint.isort]
 known-first-party = ["semaphore", "tests"]
+
+[tool.scriv]
+categories = [
+    "Backwards-incompatible changes",
+    "New features",
+    "Bug fixes",
+    "Other changes",
+]
+entry_title_template = "{{ version }} ({{ date.strftime('%Y-%m-%d') }})"
+format = "md"
+md_header_level = "2"
+new_fragment_template = "file:changelog.d/_template.md.jinja"
+skip_fragments = "_template.md.jinja"
 
 [tool.setuptools_scm]
