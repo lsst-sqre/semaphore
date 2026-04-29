@@ -373,7 +373,7 @@ def test_patch_thursday(broadcasts_dir: Path) -> None:
 def test_frontmatter_expire_ttl_conflict() -> None:
     """If frontmatter has both ttl and expire, validation should fail."""
     with pytest.raises(ValidationError):
-        BroadcastMarkdownFrontMatter.parse_obj(
+        BroadcastMarkdownFrontMatter.model_validate(
             {
                 "summary": "The summary",
                 "start": "2021-01-01 12pm",
@@ -386,7 +386,7 @@ def test_frontmatter_expire_ttl_conflict() -> None:
 def test_frontmatter_expire_before_defer() -> None:
     """If frontmatter defer is before start, validation should fail."""
     with pytest.raises(ValidationError):
-        BroadcastMarkdownFrontMatter.parse_obj(
+        BroadcastMarkdownFrontMatter.model_validate(
             {
                 "summary": "The summary",
                 "defer": "2021-01-02 12pm",

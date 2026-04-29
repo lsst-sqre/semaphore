@@ -9,11 +9,11 @@ of Semaphore as the `Config` object.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from enum import StrEnum
-from typing import Any
+from typing import Self
 
-from pydantic import BaseSettings, Field, SecretStr, validator
+from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings
 
 __all__ = ["Config", "LogLevel", "Profile"]
 
@@ -43,34 +43,42 @@ class LogLevel(StrEnum):
 class Config(BaseSettings):
     """Configuration for Semaphore."""
 
-    name: str = Field("semaphore", env="SAFIR_NAME")
+    name: str = Field("semaphore", validation_alias="SAFIR_NAME")
 
-    profile: Profile = Field(Profile.production, env="SAFIR_PROFILE")
+    profile: Profile = Field(
+        Profile.production, validation_alias="SAFIR_PROFILE"
+    )
 
-    log_level: LogLevel = Field(LogLevel.INFO, env="SAFIR_LOG_LEVEL")
+    log_level: LogLevel = Field(
+        LogLevel.INFO, validation_alias="SAFIR_LOG_LEVEL"
+    )
 
-    logger_name: str = Field("semaphore", env="SAFIR_LOGGER")
+    logger_name: str = Field("semaphore", validation_alias="SAFIR_LOGGER")
 
-    github_app_id: str | None = Field(None, env="SEMAPHORE_GITHUB_APP_ID")
+    github_app_id: str | None = Field(
+        None, validation_alias="SEMAPHORE_GITHUB_APP_ID"
+    )
     """The GitHub App ID, as determined by GitHub when setting up a GitHub
     App.
     """
 
     github_webhook_secret: SecretStr | None = Field(
-        None, env="SEMAPHORE_GITHUB_WEBHOOK_SECRET"
+        None, validation_alias="SEMAPHORE_GITHUB_WEBHOOK_SECRET"
     )
     """The GitHub app's webhook secret, as set when the App was created. See
     https://docs.github.com/en/developers/webhooks-and-events/webhooks/securing-your-webhooks
     """
 
     github_app_private_key: SecretStr | None = Field(
-        None, env="SEMAPHORE_GITHUB_APP_PRIVATE_KEY"
+        None, validation_alias="SEMAPHORE_GITHUB_APP_PRIVATE_KEY"
     )
     """The GitHub app private key. See
     https://docs.github.com/en/developers/apps/building-github-apps/authenticating-with-github-apps#generating-a-private-key
     """
 
-    enable_github_app: bool = Field(True, env="SEMAPHORE_ENABLE_GITHUB_APP")
+    enable_github_app: bool = Field(
+        True, validation_alias="SEMAPHORE_ENABLE_GITHUB_APP"
+    )
     """Toggle to enable GitHub App functionality.
 
     If configurations required to function as a GitHub App are not set,
@@ -78,7 +86,7 @@ class Config(BaseSettings):
     manually toggled to False if necessary.
     """
 
-    phalanx_env: str = Field(..., env="SEMAPHORE_PHALANX_ENV")
+    phalanx_env: str = Field(..., validation_alias="SEMAPHORE_PHALANX_ENV")
     """Name of the Phalanx environment this Semaphore installation is running
     in (e.g. ``idfprod``).
 
@@ -89,7 +97,9 @@ class Config(BaseSettings):
     For a list of environments, see https://github.com/lsst-sqre/phalanx.
     """
 
-    @validator("github_webhook_secret", "github_app_private_key", pre=True)
+    @field_validator(
+        "github_webhook_secret", "github_app_private_key", mode="before"
+    )
     def validate_none_secret(cls, v: SecretStr | None) -> SecretStr | None:
         """Validate a SecretStr setting which may be "None" that is intended
         to be `None`.
@@ -107,21 +117,25 @@ class Config(BaseSettings):
         else:
             raise ValueError(f"Value must be None or a string: {v!r}")
 
-    @validator("enable_github_app")
-    def validate_github_app(cls, v: bool, values: Mapping[str, Any]) -> bool:
+    @model_validator(mode="after")
+    def validate_github_app(self) -> Self:
         """Validate ``enable_github_app`` by ensuring that other GitHub
         configurations are also set.
         """
-        if v is False:
-            # Allow the GitHub app to be disabled regardless of other
-            # configurations.
-            return False
+        # Allow the GitHub app to be disabled regardless of other
+        # configurations.
+        if not self.enable_github_app:
+            return self
 
-        return not (
-            (values.get("github_app_private_key") is None)
-            or (values.get("github_webhook_secret") is None)
-            or (values.get("github_app_id") is None)
-        )
+        # If any setting is missing, change enable to false.
+        if (
+            self.github_app_private_key is None
+            or self.github_webhook_secret is None
+            or self.github_app_id is None
+        ):
+            self.enable_github_app = False
+
+        return self
 
 
 config = Config()
