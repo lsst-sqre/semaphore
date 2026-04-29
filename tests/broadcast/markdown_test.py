@@ -314,8 +314,7 @@ def test_defer_expire_fuzzy_default_tz(broadcasts_dir: Path) -> None:
         datetime.datetime(2021, 1, 1, 12, tzinfo=UTC),
     )
     assert scheduler.end == arrow.get(
-        datetime.datetime(2021, 1, 2, 4, tzinfo=None),
-        "America/Los_Angeles",
+        "2021-01-02 04:00 America/Los_Angeles", "YYYY-MM-DD HH:mm ZZZ"
     )
 
 

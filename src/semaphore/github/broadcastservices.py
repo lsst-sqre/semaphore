@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import dataclasses
-import os.path
 from collections.abc import AsyncIterator, Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from gidgethub import GitHubException, RateLimitExceeded
@@ -172,12 +172,12 @@ def _integrate_file_changes_in_commits(
     return files_written, files_removed
 
 
-def is_broadcast_message(path: str) -> bool:
+def is_broadcast_message(github_path: str) -> bool:
     """Determine if a path corresponds to a broadcast message file.
 
     Parameters
     ----------
-    path : `str`
+    github_path : `str`
         Posix file path in a GitHub repository.
 
     Returns
@@ -185,16 +185,18 @@ def is_broadcast_message(path: str) -> bool:
     bool
         See implementation code for the current heuristics.
     """
+    path = Path(github_path)
+
     # TODO(jsick): this function could be refactored into a class containing
     # configuration about the GitHub repo, such as where messages are hosted
     # if they aren't hosted in broadcasts/
-    if os.path.dirname(path) != BROADCASTS_DIR:
+    if str(path.parent) != BROADCASTS_DIR:
         return False
 
-    if os.path.splitext(path)[-1].lower() != ".md":
+    if path.suffix != ".md":
         return False
 
-    name = os.path.basename(path).lower()
+    name = path.name.lower()
     return not (name.startswith(".") or name == "readme.md")
 
 

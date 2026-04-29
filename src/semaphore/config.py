@@ -100,6 +100,7 @@ class Config(BaseSettings):
     @field_validator(
         "github_webhook_secret", "github_app_private_key", mode="before"
     )
+    @classmethod
     def validate_none_secret(cls, v: SecretStr | None) -> SecretStr | None:
         """Validate a SecretStr setting which may be "None" that is intended
         to be `None`.

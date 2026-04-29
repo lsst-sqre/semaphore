@@ -620,6 +620,7 @@ class BroadcastMarkdownFrontMatter(BaseModel):
         return values
 
     @field_validator("env", mode="before")
+    @classmethod
     def preprocess_env(cls, v: str | list[str]) -> list[str] | None:
         """Convert the string form of the env keyword to a list, supporting
         comma-separated lists as well.
