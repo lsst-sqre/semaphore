@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from datetime import UTC
 from typing import TYPE_CHECKING
 
 import arrow
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize(
-    "value,expected",
+    ("value", "expected"),
     [
         ("1w", datetime.timedelta(weeks=1)),
         ("1week", datetime.timedelta(weeks=1)),
@@ -263,10 +264,10 @@ def test_defer_expire(broadcasts_dir: Path) -> None:
     scheduler = broadcast.scheduler
     assert isinstance(scheduler, OneTimeScheduler)
     assert scheduler.start == arrow.get(
-        datetime.datetime(2021, 1, 1), dateutil.tz.UTC
+        datetime.datetime(2021, 1, 1, tzinfo=UTC),
     )
     assert scheduler.end == arrow.get(
-        datetime.datetime(2021, 1, 2), dateutil.tz.UTC
+        datetime.datetime(2021, 1, 2, tzinfo=UTC),
     )
 
 
@@ -292,10 +293,10 @@ def test_defer_expire_fuzzy(broadcasts_dir: Path) -> None:
     scheduler = broadcast.scheduler
     assert isinstance(scheduler, OneTimeScheduler)
     assert scheduler.start == arrow.get(
-        datetime.datetime(2021, 1, 1, 12), dateutil.tz.UTC
+        datetime.datetime(2021, 1, 1, 12, tzinfo=UTC),
     )
     assert scheduler.end == arrow.get(
-        datetime.datetime(2021, 1, 2, 4), dateutil.tz.UTC
+        datetime.datetime(2021, 1, 2, 4, tzinfo=UTC),
     )
 
 
@@ -310,10 +311,10 @@ def test_defer_expire_fuzzy_default_tz(broadcasts_dir: Path) -> None:
     scheduler = broadcast.scheduler
     assert isinstance(scheduler, OneTimeScheduler)
     assert scheduler.start == arrow.get(
-        datetime.datetime(2021, 1, 1, 12), dateutil.tz.UTC
+        datetime.datetime(2021, 1, 1, 12, tzinfo=UTC),
     )
     assert scheduler.end == arrow.get(
-        datetime.datetime(2021, 1, 2, 4),
+        datetime.datetime(2021, 1, 2, 4, tzinfo=None),
         "America/Los_Angeles",
     )
 
@@ -327,10 +328,10 @@ def test_defer_ttl(broadcasts_dir: Path) -> None:
     scheduler = broadcast.scheduler
     assert isinstance(scheduler, OneTimeScheduler)
     assert scheduler.start == arrow.get(
-        datetime.datetime(2021, 1, 1), dateutil.tz.UTC
+        datetime.datetime(2021, 1, 1, tzinfo=UTC)
     )
     assert scheduler.end == arrow.get(
-        datetime.datetime(2021, 1, 1, 1), dateutil.tz.UTC
+        datetime.datetime(2021, 1, 1, 1, tzinfo=UTC)
     )
 
 
@@ -343,7 +344,7 @@ def test_defer_noexpire(broadcasts_dir: Path) -> None:
     scheduler = broadcast.scheduler
     assert isinstance(scheduler, OpenEndedScheduler)
     assert scheduler.start == arrow.get(
-        datetime.datetime(2021, 1, 1), dateutil.tz.UTC
+        datetime.datetime(2021, 1, 1, tzinfo=UTC)
     )
 
 
@@ -356,7 +357,7 @@ def test_expire(broadcasts_dir: Path) -> None:
     scheduler = broadcast.scheduler
     assert isinstance(scheduler, FixedExpirationScheduler)
     assert scheduler.end == arrow.get(
-        datetime.datetime(2021, 1, 2), dateutil.tz.UTC
+        datetime.datetime(2021, 1, 2, tzinfo=UTC)
     )
 
 
@@ -373,12 +374,12 @@ def test_frontmatter_expire_ttl_conflict() -> None:
     """If frontmatter has both ttl and expire, validation should fail."""
     with pytest.raises(ValidationError):
         BroadcastMarkdownFrontMatter.parse_obj(
-            dict(
-                summary="The summary",
-                start="2021-01-01 12pm",
-                expire="2021-02-01 1pm",
-                ttl="2h",
-            )
+            {
+                "summary": "The summary",
+                "start": "2021-01-01 12pm",
+                "expire": "2021-02-01 1pm",
+                "ttl": "2h",
+            }
         )
 
 
@@ -386,9 +387,9 @@ def test_frontmatter_expire_before_defer() -> None:
     """If frontmatter defer is before start, validation should fail."""
     with pytest.raises(ValidationError):
         BroadcastMarkdownFrontMatter.parse_obj(
-            dict(
-                summary="The summary",
-                defer="2021-01-02 12pm",
-                expire="2021-01-01 1pm",
-            )
+            {
+                "summary": "The summary",
+                "defer": "2021-01-02 12pm",
+                "expire": "2021-01-01 1pm",
+            }
         )

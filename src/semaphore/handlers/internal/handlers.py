@@ -32,8 +32,4 @@ async def get_index() -> Metadata:
 
     By convention, this endpoint returns only the application's metadata.
     """
-    metadata = get_metadata(
-        package_name="semaphore",
-        application_name=config.name,
-    )
-    return metadata
+    return get_metadata(package_name="semaphore", application_name=config.name)

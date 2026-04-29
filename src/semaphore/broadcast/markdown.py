@@ -7,16 +7,8 @@ from __future__ import annotations
 import datetime
 import enum
 import re
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Dict,
-    List,
-    Literal,
-    Mapping,
-    Optional,
-    Union,
-)
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Literal
 
 import arrow
 import dateutil
@@ -25,7 +17,9 @@ import dateutil.rrule
 import yaml
 from markdown_it import MarkdownIt
 from mdformat.renderer import MDRenderer
-from mdit_py_plugins.front_matter import front_matter_plugin  # type: ignore
+from mdit_py_plugins.front_matter import (  # type: ignore[attr-defined]
+    front_matter_plugin,
+)
 from pydantic import BaseModel, root_validator, validator
 
 from .models import (
@@ -89,7 +83,7 @@ class BroadcastMarkdown:
     def __init__(self, text: str, identifier: str) -> None:
         self._text = text
         self.identifier = identifier
-        self._md_env: Dict[Any, Any] = {}
+        self._md_env: dict[Any, Any] = {}
         self._md_tokens = md.parse(text, self._md_env)
         self._metadata = self._parse_metadata()
 
@@ -117,7 +111,7 @@ class BroadcastMarkdown:
         return self._text
 
     @property
-    def body(self) -> Optional[str]:
+    def body(self) -> str | None:
         """The text of the markdown body or `None` if the message doesn't have
         body content.
         """
@@ -146,12 +140,9 @@ class BroadcastMarkdown:
             `True`, if the message should be included in that environment's
             broadcast message. `False` otherwise.
         """
-        if (self._metadata.env is None) or (env_name in self._metadata.env):
-            return True
-        else:
-            return False
+        return (self._metadata.env is None) or (env_name in self._metadata.env)
 
-    def extract_content(self, getSummary: bool) -> str | None:
+    def extract_content(self, *, get_summary: bool) -> str | None:
         if self.body is None:
             raise RuntimeError("No body provided")
 
@@ -161,14 +152,14 @@ class BroadcastMarkdown:
         del paragraphs[0]
         new_body = "\n\n".join(paragraphs)
 
-        if getSummary:
+        if get_summary:
             return new_summary
         else:
             return new_body
 
     @property
     def extracted_summary(self) -> str:
-        content = self.extract_content(True)
+        content = self.extract_content(get_summary=True)
 
         if content is None:
             raise RuntimeError("No summary found")
@@ -177,7 +168,7 @@ class BroadcastMarkdown:
 
     @property
     def extracted_body(self) -> str | None:
-        content = self.extract_content(False)
+        content = self.extract_content(get_summary=False)
 
         if content == "":
             return None
@@ -192,7 +183,6 @@ class BroadcastMarkdown:
         `semaphore.broadcast.data.BroadcastMessage`
             The broadcast message.
         """
-
         if self.body is not None and self.metadata.summary is None:
             new_summary = self.extracted_summary
 
@@ -251,7 +241,7 @@ class BroadcastMarkdown:
             return PermaScheduler()
 
 
-class FreqEnum(str, enum.Enum):
+class FreqEnum(enum.StrEnum):
     """An enumeration of frequency labels for RecurringRule."""
 
     # These are lower-cased versions of dateutil.rrule frequency attribute
@@ -264,12 +254,13 @@ class FreqEnum(str, enum.Enum):
     minutely = "minutely"
 
     def to_rrule_freq(self) -> Literal[0, 1, 2, 3, 4, 5, 6]:
-        """Converts the frequency to an integer for use as teh ``freq``
-        parameter in `dateutil.rrule.rrule`."""
+        """Convert the frequency to an integer for use as the ``freq``
+        parameter in `dateutil.rrule.rrule`.
+        """
         return getattr(dateutil.rrule, self.name.upper())
 
 
-class WeekdayEnum(str, enum.Enum):
+class WeekdayEnum(enum.StrEnum):
     """A enumeration of weekday names."""
 
     sunday = "sunday"
@@ -285,19 +276,19 @@ class WeekdayEnum(str, enum.Enum):
         ``byweekday`` and ``wkst`` parameter of `dateutil.rrule.rrule`.
         """
         if self.name == "sunday":
-            return getattr(dateutil.rrule, "SU")
+            return dateutil.rrule.SU
         elif self.name == "monday":
-            return getattr(dateutil.rrule, "MO")
+            return dateutil.rrule.MO
         elif self.name == "tuesday":
-            return getattr(dateutil.rrule, "TU")
+            return dateutil.rrule.TU
         elif self.name == "wednesday":
-            return getattr(dateutil.rrule, "WE")
+            return dateutil.rrule.WE
         elif self.name == "thursday":
-            return getattr(dateutil.rrule, "TH")
+            return dateutil.rrule.TH
         elif self.name == "friday":
-            return getattr(dateutil.rrule, "FR")
+            return dateutil.rrule.FR
         else:
-            return getattr(dateutil.rrule, "SA")
+            return dateutil.rrule.SA
 
 
 class ByWeekday(BaseModel):
@@ -308,7 +299,7 @@ class ByWeekday(BaseModel):
     day: WeekdayEnum
     """The day of the week."""
 
-    index: Optional[int] = None
+    index: int | None = None
     """The index of the weekday. For example, with a monthly recurrency
     frequency, an index of ``1`` means the first of that weekday of the
     month.
@@ -336,15 +327,15 @@ class RecurringRule(BaseModel):
     names here are slightly modified for consistency within the Semaphore app.
     """
 
-    timezone: Optional[datetime.tzinfo]
+    timezone: datetime.tzinfo | None
     """Default timezone for any datetime fields that don't contain explicit
     datetimes.
     """
 
-    date: Optional[arrow.Arrow] = None
+    date: arrow.Arrow | None = None
     """A fixed datetime to include (or exclude) from the recurrence."""
 
-    freq: Optional[FreqEnum] = None
+    freq: FreqEnum | None = None
     """Frequency of recurrence."""
 
     interval: int = 1
@@ -354,26 +345,26 @@ class RecurringRule(BaseModel):
     rule triggers every two months.
     """
 
-    start: Optional[arrow.Arrow] = None
+    start: arrow.Arrow | None = None
     """The date when the repeating rule starts. If not set, the rule is
     assumed to start now.
     """
 
-    end: Optional[arrow.Arrow] = None
+    end: arrow.Arrow | None = None
     """Then date when this rule ends. The last recurrence is the datetime
     that is less than or equal to this date. If not set, the rule can recur
     infinitely.
     """
 
-    count: Optional[int] = None
+    count: int | None = None
     """The number of occurrences of this recurring rule. The ``count`` must
     be used exclusively of the ``end`` date field.
     """
 
-    week_start: Optional[WeekdayEnum] = None
+    week_start: WeekdayEnum | None = None
     """The week start day for weekly frequencies."""
 
-    by_set_position: Optional[List[int]] = None
+    by_set_position: list[int] | None = None
     """Each integer specifies the occurence number within the recurrence
     frequency (freq).
 
@@ -382,39 +373,39 @@ class RecurringRule(BaseModel):
     specifies the last Friday of the month.
     """
 
-    by_month: Optional[List[int]] = None
+    by_month: list[int] | None = None
     """The months (1-12) when the recurrence happens. Use negative integers
     to specify an index from the end of the year.
     """
 
-    by_month_day: Optional[List[int]] = None
+    by_month_day: list[int] | None = None
     """The days of the month (1-31) when the recurrence happens. Use negative
     integers to specify an index from the end of the month.
     """
 
-    by_year_day: Optional[List[int]] = None
+    by_year_day: list[int] | None = None
     """The days of the year (1-366; allowing for leap years) when the
     recurrence happens. Use negative integers to specify a day relative to the
     end of the year.
     """
 
-    by_week: Optional[List[int]] = None
+    by_week: list[int] | None = None
     """The weeks of the year (1-52) when the recurrence happens. Use negative
     integers to specify a week relative to the end of the year. The definition
     of week matches ISO 8601: the first week of the year is the one with at
     least 4 days.
     """
 
-    by_weekday: Optional[List[ByWeekday]] = None
+    by_weekday: list[ByWeekday] | None = None
     """The days of the week when the recurrence happens."""
 
-    by_hour: Optional[List[int]] = None
+    by_hour: list[int] | None = None
     """The hours of the day (0-23) when the recurrence happens."""
 
-    by_minute: Optional[List[int]] = None
+    by_minute: list[int] | None = None
     """The minutes of the hour (0-23) when the recurrence happens."""
 
-    by_second: Optional[List[int]] = None
+    by_second: list[int] | None = None
     """The seconds of the minute (0-59) when the recurrence happens."""
 
     exclude: bool = False
@@ -422,15 +413,15 @@ class RecurringRule(BaseModel):
 
     @validator("timezone", pre=True, allow_reuse=True)
     def preprocess_timezone(
-        cls, v: Any, values: Dict[str, Any], **kwargs: Any
+        cls, v: Any, values: dict[str, Any], **kwargs: Any
     ) -> datetime.tzinfo:
         """Convert a timezone into a tzinfo instance."""
         return convert_to_tzinfo(v)
 
     @validator("date", "start", "end", pre=True, allow_reuse=True)
     def preprocess_optional_arrow(
-        cls, v: Any, values: Dict[str, Any], **kwargs: Any
-    ) -> Optional[arrow.Arrow]:
+        cls, v: Any, values: dict[str, Any], **kwargs: Any
+    ) -> arrow.Arrow | None:
         """Convert a datetime into a arrow.Arrow, or None."""
         if v is None:
             return v
@@ -545,34 +536,31 @@ class RecurringRule(BaseModel):
             raise RuntimeError(
                 'Cannot export an rrule without a "freq" field.'
             )
-        else:
-            return dateutil.rrule.rrule(
-                freq=self.freq.to_rrule_freq(),
-                dtstart=self.start.datetime if self.start else None,
-                interval=self.interval,
-                wkst=(
-                    self.week_start.to_rrule_weekday()
-                    if self.week_start
-                    else None
-                ),
-                until=self.end.datetime if self.end else None,
-                bysetpos=self.by_set_position,
-                bymonth=self.by_month,
-                bymonthday=self.by_month_day,
-                byyearday=self.by_year_day,
-                byweekno=self.by_week,
-                byweekday=(
-                    [w.to_rrule_weekday() for w in self.by_weekday]
-                    if self.by_weekday
-                    else None
-                ),
-                byhour=self.by_hour,
-                byminute=self.by_minute,
-                bysecond=self.by_second,
-            )
+        return dateutil.rrule.rrule(
+            freq=self.freq.to_rrule_freq(),
+            dtstart=self.start.datetime if self.start else None,
+            interval=self.interval,
+            wkst=(
+                self.week_start.to_rrule_weekday() if self.week_start else None
+            ),
+            until=self.end.datetime if self.end else None,
+            bysetpos=self.by_set_position,
+            bymonth=self.by_month,
+            bymonthday=self.by_month_day,
+            byyearday=self.by_year_day,
+            byweekno=self.by_week,
+            byweekday=(
+                [w.to_rrule_weekday() for w in self.by_weekday]
+                if self.by_weekday
+                else None
+            ),
+            byhour=self.by_hour,
+            byminute=self.by_minute,
+            bysecond=self.by_second,
+        )
 
     def to_datetime(self) -> datetime.datetime:
-        """Export to a `datetime.datetime.`"""
+        """Export to a `datetime.datetime`."""
         if self.date is None:
             raise RuntimeError(
                 "Cannot export a recurrence-based rule as a single date. "
@@ -591,14 +579,14 @@ class BroadcastMarkdownFrontMatter(BaseModel):
     message.
     """
 
-    summary: Optional[str] = None
+    summary: str | None = None
     """Broadcast summary message.
 
     If not set, summary will be set to None then default to the first
     paragraph of the body.
     """
 
-    env: Optional[List[str]] = None
+    env: list[str] | None = None
     """The list of applicable environments. None implies that the broadcast
     is applicable to all environments.
     """
@@ -610,16 +598,16 @@ class BroadcastMarkdownFrontMatter(BaseModel):
     If not set, the default timezone is UTC.
     """
 
-    defer: Optional[arrow.Arrow] = None
+    defer: arrow.Arrow | None = None
     """Date when the message is deferred to start."""
 
-    expire: Optional[arrow.Arrow] = None
+    expire: arrow.Arrow | None = None
     """Date when the message expires."""
 
-    ttl: Optional[datetime.timedelta] = None
+    ttl: datetime.timedelta | None = None
     """Time duration if `expire` is not set with `defer`."""
 
-    rules: Optional[List[RecurringRule]] = None
+    rules: list[RecurringRule] | None = None
     """For creating a repeating schedule, a list of rrule or dates to
     include or exclude.
     """
@@ -634,13 +622,13 @@ class BroadcastMarkdownFrontMatter(BaseModel):
     def propagate_timezone(
         cls, values: Mapping[str, Any]
     ) -> Mapping[str, Any]:
-        """A pre-validator that propagates timezone info from the top-level,
+        """Pre-validate by propagating timezone info from the top-level,
         if present, into individual rules items, if present, and if those
         items do not already have a non-None timezone.
         """
-        if "timezone" in values.keys():
+        if "timezone" in values:
             default_tz = values["timezone"]
-            if "rules" in values.keys():
+            if "rules" in values:
                 for r in values["rules"]:
                     if r.get("timezone") is None:
                         r["timezone"] = default_tz
@@ -649,8 +637,8 @@ class BroadcastMarkdownFrontMatter(BaseModel):
 
     @validator("env", pre=True)
     def preprocess_env(
-        cls, v: Union[str, List[str]], **kwargs: Any
-    ) -> Optional[List[str]]:
+        cls, v: str | list[str], **kwargs: Any
+    ) -> list[str] | None:
         """Convert the string form of the env keyword to a list, supporting
         comma-separated lists as well.
         """
@@ -661,15 +649,15 @@ class BroadcastMarkdownFrontMatter(BaseModel):
 
     @validator("timezone", pre=True, allow_reuse=True)
     def preprocess_timezone(
-        cls, v: Any, values: Dict[str, Any], **kwargs: Any
+        cls, v: Any, values: dict[str, Any], **kwargs: Any
     ) -> datetime.tzinfo:
         """Convert a timezone into a tzinfo instance."""
         return convert_to_tzinfo(v)
 
     @validator("defer", "expire", pre=True, allow_reuse=True)
     def preprocess_optional_arrow(
-        cls, v: Any, values: Dict[str, Any], **kwargs: Any
-    ) -> Optional[arrow.Arrow]:
+        cls, v: Any, values: dict[str, Any], **kwargs: Any
+    ) -> arrow.Arrow | None:
         """Convert the nullable arrow.Arrow fields from either date.date,
         date.datetime, or fuzzy string froms into arrow.Arrow types with
         timezone information.
@@ -686,8 +674,8 @@ class BroadcastMarkdownFrontMatter(BaseModel):
 
     @validator("ttl", pre=True, allow_reuse=True)
     def preprocess_timedelta(
-        cls, v: Any, values: Dict[str, Any], **kwargs: Any
-    ) -> Optional[datetime.timedelta]:
+        cls, v: Any, values: dict[str, Any], **kwargs: Any
+    ) -> datetime.timedelta | None:
         if v is None:
             return None
         else:
@@ -704,14 +692,9 @@ class BroadcastMarkdownFrontMatter(BaseModel):
             )
 
         # defer must be before expire
-        if (
-            values.get("defer") is not None
-            and values.get("expire") is not None
-        ):
-            _defer = values.get("defer")
-            assert isinstance(_defer, arrow.Arrow)  # for type-checking
-            _expire = values.get("expire")
-            assert isinstance(_expire, arrow.Arrow)  # for type-checking
+        _defer = values.get("defer")
+        _expire = values.get("expire")
+        if _defer is not None and _expire is not None:
             if _expire < _defer:
                 raise ValueError('"expire" cannot happen before "defer"')
 
@@ -757,13 +740,13 @@ def convert_to_tzinfo(v: Any) -> datetime.tzinfo:
     elif isinstance(v, str):
         tz = dateutil.tz.gettz(v)
         if not isinstance(tz, datetime.tzinfo):
-            raise ValueError(f"Could not parse timezone from {v!s}")
+            raise TypeError(f"Could not parse timezone from {v!s}")
         return tz
     else:
         raise TypeError(f"Incorrect type for timezone, got {v!r}.")
 
 
-def convert_to_arrow(v: Any, default_tz: Optional[Any] = None) -> arrow.Arrow:
+def convert_to_arrow(v: Any, default_tz: Any | None = None) -> arrow.Arrow:
     """Convert a value to an arrow.Arrow datetime.
 
     This function is intended to be used in a validator for Pydantic models,
@@ -780,7 +763,7 @@ def convert_to_arrow(v: Any, default_tz: Optional[Any] = None) -> arrow.Arrow:
     """
     if v is None:
         raise ValueError("Cannot determine date from None")
-    elif isinstance(v, datetime.date):
+    if isinstance(v, datetime.date):
         # Pydantic pre-parses YYYY-MM-DD into a datetime.date even if
         # we didn't declare the field as a datetime.date type
         dt = datetime.datetime.combine(v, datetime.time())
@@ -792,20 +775,19 @@ def convert_to_arrow(v: Any, default_tz: Optional[Any] = None) -> arrow.Arrow:
     elif isinstance(v, str):
         try:
             dt = dateutil.parser.parse(v, fuzzy=True, yearfirst=True)
-        except (ValueError, OverflowError):
-            raise ValueError("Could not parse date")
+        except (ValueError, OverflowError) as e:
+            raise ValueError("Could not parse date") from e
     else:
         raise TypeError(f"Not a string (got {v!r})")
 
     if dt.tzinfo:
         # Parsed date includes a timezone.
         return arrow.get(dt)
+    # naive datetime, so default to given timezone
+    elif default_tz:
+        return arrow.get(dt, default_tz)
     else:
-        # naive datetime, so default to given timezone
-        if default_tz:
-            return arrow.get(dt, default_tz)
-        else:
-            return arrow.get(dt, dateutil.tz.UTC)
+        return arrow.get(dt, dateutil.tz.UTC)
 
 
 def convert_to_timedelta(v: Any) -> datetime.timedelta:

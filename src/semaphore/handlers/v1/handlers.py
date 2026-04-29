@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
@@ -20,14 +20,14 @@ router = APIRouter(prefix=f"/{config.name}/v1")
     "/broadcasts",
     summary="Get broadcasts",
     description="List broadcast messages.",
-    response_model=List[BroadcastMessageModel],
+    response_model=list[BroadcastMessageModel],
     tags=["broadcasts"],
 )
 def get_broadcasts(
-    broadcast_repo: BroadcastMessageRepository = Depends(
-        broadcast_repo_dependency
-    ),
-) -> List[BroadcastMessageModel]:
+    broadcast_repo: Annotated[
+        BroadcastMessageRepository, Depends(broadcast_repo_dependency)
+    ],
+) -> list[BroadcastMessageModel]:
     return [
         BroadcastMessageModel.from_broadcast_message(m)
         for m in broadcast_repo.iter_active()

@@ -45,8 +45,8 @@ async def handle_push_event(
     """
     git_ref = event.data["ref"]
 
-    # TODO process only broadcasts on the HEAD branch. The name of this
-    # branch should be detected from the repository settings.
+    # TODO(jsick): process only broadcasts on the HEAD branch. The name of
+    # this branch should be detected from the repository settings.
     if git_ref == "refs/heads/main":
         await update_broadcast_repo_from_push_event(
             event=event,

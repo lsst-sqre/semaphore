@@ -4,15 +4,8 @@ from __future__ import annotations
 
 import dataclasses
 import os.path
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    AsyncIterator,
-    Dict,
-    Sequence,
-    Set,
-    Tuple,
-)
+from collections.abc import AsyncIterator, Sequence
+from typing import TYPE_CHECKING, Any
 
 from gidgethub import GitHubException, RateLimitExceeded
 from gidgethub.sansio import accept_format
@@ -78,7 +71,7 @@ class GitHubMessageRef:
             f"?ref={self.ref}"
         )
 
-    def as_dict(self) -> Dict[str, str]:
+    def as_dict(self) -> dict[str, str]:
         """Express the message as a dict, which is useful for establishing
         logging context.
         """
@@ -92,7 +85,7 @@ async def update_broadcast_repo_from_push_event(
     github_client: GitHubAPI,
     logger: BoundLogger,
 ) -> None:
-    """Updates messages in the repository based on a GitHub webhook for the
+    """Update messages in the repository based on a GitHub webhook for the
     push event, either adding, modifying, or removing messages based on
     the pushed commits.
 
@@ -130,18 +123,16 @@ async def update_broadcast_repo_from_push_event(
                 logger=logger,
             )
         except RateLimitExceeded as e:
-            logger.error(
+            logger.exception(
                 "GitHub rate limit exception",
                 limit=e.rate_limit.limit,
                 remaining=e.rate_limit.remaining,
                 resets_at=e.rate_limit.reset_datetime,
             )
         except GitHubException as e:
-            logger.error("GitHub error", exception=str(e))
+            logger.exception("GitHub error", error=str(e))
         except Exception as e:
-            logger.error("Unknown error", exception=str(e))
-        finally:
-            continue
+            logger.exception("Unknown error", error=str(e))
 
     for path in filter(is_broadcast_message, files_removed):
         message_id = GitHubMessageRef.from_push_event(
@@ -155,8 +146,8 @@ async def update_broadcast_repo_from_push_event(
 
 
 def _integrate_file_changes_in_commits(
-    commits: Sequence[Dict[str, Any]],
-) -> Tuple[Set[str], Set[str]]:
+    commits: Sequence[dict[str, Any]],
+) -> tuple[set[str], set[str]]:
     """Integrate the file changes from the sequence of individual commits
     to determine the overall set of added/modified and removed files.
     """
@@ -194,22 +185,17 @@ def is_broadcast_message(path: str) -> bool:
     bool
         See implementation code for the current heuristics.
     """
-    # TODO this function could be refactored into a class containing
+    # TODO(jsick): this function could be refactored into a class containing
     # configuration about the GitHub repo, such as where messages are hosted
     # if they aren't hosted in broadcasts/
     if os.path.dirname(path) != BROADCASTS_DIR:
         return False
 
-    if os.path.splitext(path)[-1].lower() not in set([".md"]):
+    if os.path.splitext(path)[-1].lower() != ".md":
         return False
 
     name = os.path.basename(path).lower()
-    if name.startswith("."):
-        return False
-    if name == "readme.md":
-        return False
-
-    return True
+    return not (name.startswith(".") or name == "readme.md")
 
 
 async def add_file_to_repository(
@@ -323,7 +309,7 @@ async def bootstrap_broadcast_repo(
                         path=file_obj["path"],
                         repo_name=github_repo["name"],
                         repo_owner=github_repo["owner"]["login"],
-                        ref=f'refs/heads/{github_repo["default_branch"]}',
+                        ref=f"refs/heads/{github_repo['default_branch']}",
                     )
                     await add_file_to_repository(
                         file_path=file_obj["path"],
@@ -337,7 +323,7 @@ async def bootstrap_broadcast_repo(
 
 async def iter_installations(
     *, github_client: GitHubAPI, jwt: str
-) -> AsyncIterator[Dict[str, Any]]:
+) -> AsyncIterator[dict[str, Any]]:
     """Iterate over the GitHub app installations.
 
     Parameters
@@ -363,7 +349,7 @@ async def iter_installations(
 async def iter_installation_repositories(
     *,
     github_client: GitHubAPI,
-) -> AsyncIterator[Dict[str, Any]]:
+) -> AsyncIterator[dict[str, Any]]:
     """Iterate over repositories that the GitHub app installation has access
     to.
 
@@ -379,7 +365,7 @@ async def iter_installation_repositories(
         The repository resource from the GitHub v3 API. See
         https://docs.github.com/en/rest/reference/apps#list-repositories-accessible-to-the-app-installation
     """
-    # FIXME we're temporarily getitem instead of getiter because
+    # TODO(jsick): we're temporarily getitem instead of getiter because
     # of https://github.com/brettcannon/gidgethub/issues/164
     # this means we'll miss any extra pages, but that should be fine for now
     # given the small number of installations expected (generally 1 repo!).
@@ -390,7 +376,7 @@ async def iter_installation_repositories(
 
 async def iter_repo_dir_contents(
     github_client: GitHubAPI, contents_url: str, directory_path: str
-) -> AsyncIterator[Dict[str, Any]]:
+) -> AsyncIterator[dict[str, Any]]:
     """Iterate over content objects in a repository in a GitHub repository.
 
     Parameters

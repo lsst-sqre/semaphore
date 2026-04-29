@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -14,11 +14,10 @@ if TYPE_CHECKING:
     from httpx import AsyncClient
 
 
-async def get_broadcasts(client: AsyncClient) -> Dict[str, Any]:
+async def get_broadcasts(client: AsyncClient) -> dict[str, Any]:
     response = await client.get("/semaphore/v1/broadcasts")
     assert response.status_code == 200
-    data = response.json()
-    return data
+    return response.json()
 
 
 @pytest.mark.asyncio

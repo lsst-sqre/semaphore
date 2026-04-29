@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, Request, Response, status
@@ -41,7 +42,7 @@ These routes have paths prefixed by the application name.
     tags=["internal"],
 )
 async def get_index(
-    logger: BoundLogger = Depends(logger_dependency),
+    logger: Annotated[BoundLogger, Depends(logger_dependency)],
 ) -> Index:
     """GET ``/semaphore/`` (the app's external root).
 
@@ -74,11 +75,11 @@ async def get_index(
 )
 async def post_github_webhook(
     request: Request,
-    logger: BoundLogger = Depends(logger_dependency),
-    http_client: httpx.AsyncClient = Depends(http_client_dependency),
-    broadcast_repo: BroadcastMessageRepository = Depends(
-        broadcast_repo_dependency
-    ),
+    logger: Annotated[BoundLogger, Depends(logger_dependency)],
+    http_client: Annotated[httpx.AsyncClient, Depends(http_client_dependency)],
+    broadcast_repo: Annotated[
+        BroadcastMessageRepository, Depends(broadcast_repo_dependency)
+    ],
 ) -> Response:
     """Process GitHub webhook events."""
     if not config.enable_github_app:

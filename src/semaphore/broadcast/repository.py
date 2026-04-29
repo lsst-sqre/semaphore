@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, Iterator, Optional, Sequence
+from collections.abc import Iterator, Sequence
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .models import BroadcastMessage
@@ -29,9 +30,9 @@ class BroadcastMessageRepository:
     """
 
     def __init__(
-        self, messages: Optional[Sequence[BroadcastMessage]] = None
+        self, messages: Sequence[BroadcastMessage] | None = None
     ) -> None:
-        self._messages: Dict[str, BroadcastMessage] = {}
+        self._messages: dict[str, BroadcastMessage] = {}
         if messages is not None:
             for message in messages:
                 self.add(message)
@@ -48,7 +49,7 @@ class BroadcastMessageRepository:
         self._messages[message.identifier] = message
 
     def __contains__(self, identifier: str) -> bool:
-        return identifier in self._messages.keys()
+        return identifier in self._messages
 
     def __getitem__(self, identifier: str) -> BroadcastMessage:
         """Get an item based on a message's identifier.
@@ -90,15 +91,14 @@ class BroadcastMessageRepository:
         """
         try:
             return self._messages[identifier]
-        except KeyError:
+        except KeyError as e:
             raise NotFoundError(
                 f"{identifier} is not in the broadcast message repository"
-            )
+            ) from e
 
     def iter(self) -> Iterator[BroadcastMessage]:
         """Iterate over all messages."""
-        for message in self._messages.values():
-            yield message
+        yield from self._messages.values()
 
     def iter_active(self) -> Iterator[BroadcastMessage]:
         """Iterate over messages that are currently active (based on their
@@ -124,12 +124,14 @@ class BroadcastMessageRepository:
             if message.scheduler.has_future_events():
                 yield message
 
-    def remove(self, identifier: str, raise_if_missing: bool = False) -> None:
+    def remove(
+        self, identifier: str, *, raise_if_missing: bool = False
+    ) -> None:
         """Remove the message."""
         try:
             del self._messages[identifier]
-        except KeyError:
+        except KeyError as e:
             if raise_if_missing:
                 raise NotFoundError(
                     f"{identifier} is not in the broadcast message repository"
-                )
+                ) from e

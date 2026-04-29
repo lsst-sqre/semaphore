@@ -13,7 +13,7 @@ from httpx import ASGITransport, AsyncClient
 from semaphore import main
 
 if TYPE_CHECKING:
-    from typing import AsyncIterator
+    from collections.abc import AsyncIterator
 
     from fastapi import FastAPI
 

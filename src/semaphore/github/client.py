@@ -4,7 +4,7 @@ configuration.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import gidgethub.apps
 from gidgethub.httpx import GitHubAPI
@@ -16,8 +16,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "GitHubClientConfigError",
-    "get_app_jwt",
     "create_github_installation_client",
+    "get_app_jwt",
 ]
 
 
@@ -61,7 +61,7 @@ def get_app_jwt() -> str:
 
 
 def create_github_client(
-    *, http_client: httpx.AsyncClient, oauth_token: Optional[str] = None
+    *, http_client: httpx.AsyncClient, oauth_token: str | None = None
 ) -> GitHubAPI:
     """Create an HTTPx GitHub client.
 
@@ -126,5 +126,4 @@ async def create_github_installation_client(
     token = token_info["token"]
 
     # Generate a new client with the embedded OAuth token.
-    gh = create_github_client(http_client=http_client, oauth_token=token)
-    return gh
+    return create_github_client(http_client=http_client, oauth_token=token)
