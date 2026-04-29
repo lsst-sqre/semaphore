@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from importlib.metadata import version
 
 import structlog
@@ -28,6 +30,25 @@ configure_logging(
     name=config.logger_name,
 )
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+    logger = structlog.get_logger(config.logger_name)
+    logger.info("Running startup")
+
+    broadcast_repo = await broadcast_repo_dependency()
+    if config.enable_github_app:
+        await bootstrap_broadcast_repo(
+            http_client=await http_client_dependency(),
+            broadcast_repo=broadcast_repo,
+            logger=logger,
+        )
+
+    yield
+
+    await http_client_dependency.aclose()
+
+
 app = FastAPI(
     title="Semaphore",
     description=(
@@ -42,6 +63,7 @@ app = FastAPI(
     docs_url=f"/{config.name}/docs",
     redoc_url=f"/{config.name}/redoc",
     openapi_url=f"/{config.name}/openapi.json",
+    lifespan=lifespan,
 )
 app.include_router(internal_router)
 app.include_router(external_router)
@@ -57,25 +79,6 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    logger = structlog.get_logger(config.logger_name)
-    logger.info("Running startup")
-
-    broadcast_repo = await broadcast_repo_dependency()
-    if config.enable_github_app:
-        await bootstrap_broadcast_repo(
-            http_client=await http_client_dependency(),
-            broadcast_repo=broadcast_repo,
-            logger=logger,
-        )
-
-
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
-    await http_client_dependency.aclose()
 
 
 def create_openapi() -> str:
