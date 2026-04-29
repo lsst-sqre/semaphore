@@ -1,7 +1,5 @@
 """Models for the external API handlers."""
 
-from typing import Optional
-
 from pydantic import BaseModel, Field
 from safir.metadata import Metadata as SafirMetadata
 
@@ -15,7 +13,7 @@ class Index(BaseModel):
 
     metadata: SafirMetadata = Field(..., title="Package metadata")
 
-    github_app_id: Optional[str]
+    github_app_id: str | None
     """The GitHub APP ID, if Semaphore is configured as a GitHub App."""
 
     github_app_enabled: bool

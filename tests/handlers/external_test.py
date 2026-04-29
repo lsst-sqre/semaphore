@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 @pytest.mark.asyncio
 async def test_get_index(client: AsyncClient) -> None:
-    """Test ``GET /semaphore/``"""
+    """Test ``GET /semaphore/``."""
     response = await client.get("/semaphore/")
     assert response.status_code == 200
     data = response.json()

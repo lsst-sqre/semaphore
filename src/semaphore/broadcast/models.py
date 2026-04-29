@@ -5,30 +5,28 @@ from __future__ import annotations
 import datetime
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, cast
 
 import arrow
 
 if TYPE_CHECKING:
-    from typing import Optional, Tuple
-
     import dateutil.rrule
 
 
 __all__ = [
+    "BroadcastCategory",
     "BroadcastMessage",
-    "Scheduler",
-    "PermaScheduler",
-    "RecurringScheduler",
+    "FixedExpirationScheduler",
     "OneTimeScheduler",
     "OpenEndedScheduler",
-    "FixedExpirationScheduler",
-    "BroadcastCategory",
+    "PermaScheduler",
+    "RecurringScheduler",
+    "Scheduler",
 ]
 
 
-class BroadcastCategory(str, Enum):
+class BroadcastCategory(StrEnum):
     """Broadcast message categories."""
 
     outage = "outage"
@@ -46,16 +44,16 @@ class Scheduler(ABC):
 
     @abstractmethod
     def is_active(self) -> bool:
-        """Tests if the scheduled event is active."""
+        """Test if the scheduled event is active."""
 
     @abstractmethod
     def has_future_events(self) -> bool:
-        """Tests if the schedule includes a future event (not including the
+        """Test if the schedule includes a future event (not including the
         current event).
         """
 
     def is_stale(self) -> bool:
-        """True, if the event is neither active or in the future."""
+        """Return `True` if the event is neither active or in the future."""
         return not (self.is_active() | self.has_future_events())
 
 
@@ -94,10 +92,7 @@ class OpenEndedScheduler(Scheduler):
         return arrow.utcnow() >= self.start
 
     def has_future_events(self) -> bool:
-        if arrow.utcnow() < self.start:
-            return True
-        else:
-            return False
+        return arrow.utcnow() < self.start
 
 
 @dataclass(frozen=True)
@@ -135,10 +130,7 @@ class OneTimeScheduler(Scheduler):
         return arrow.utcnow().is_between(self.start, self.end, bounds="[)")
 
     def has_future_events(self) -> bool:
-        if self.start > arrow.utcnow():
-            return True
-        else:
-            return False
+        return self.start > arrow.utcnow()
 
 
 class RecurringScheduler(Scheduler):
@@ -207,13 +199,10 @@ class RecurringScheduler(Scheduler):
                 return False
             return True
         else:
-            if self._end < now:
-                # Running is_active() above already refreshed the start/end
-                # dates, so if _end is in the past, there will never be a
-                # future event
-                return False
-            else:
-                return True
+            # Running is_active() above already refreshed the start/end
+            # dates, so if _end is in the past, there will never be a
+            # future event
+            return self._end >= now
 
     def _refresh(self) -> None:
         if self._end < arrow.utcnow():
@@ -221,7 +210,7 @@ class RecurringScheduler(Scheduler):
             try:
                 candidate_start, candidate_end = self._propose(self._start)
             except ValueError:
-                return None  # no future event
+                return  # no future event
             while candidate_end < arrow.utcnow():
                 # Keep iterating in case windows overlap
                 try:
@@ -229,11 +218,11 @@ class RecurringScheduler(Scheduler):
                         candidate_start
                     )
                 except ValueError:
-                    return None  # no future event
+                    return  # no future event
             # Set next start date
             self._start = candidate_start
 
-    def _propose(self, after: arrow.Arrow) -> Tuple[arrow.Arrow, arrow.Arrow]:
+    def _propose(self, after: arrow.Arrow) -> tuple[arrow.Arrow, arrow.Arrow]:
         """Propose a new start/end time after the given time.
 
         Raises
@@ -242,12 +231,11 @@ class RecurringScheduler(Scheduler):
             Raised if a start/end time can't be proposed based on the
             rule set.
         """
-        after_datetime = cast(datetime.datetime, after)
+        after_datetime = cast("datetime.datetime", after)
         candidate_start = self.rruleset.after(after_datetime, inc=False)
         if candidate_start is None:
             raise ValueError
-        else:
-            candidate_start_arrow = arrow.get(candidate_start)
+        candidate_start_arrow = arrow.get(candidate_start)
         candidate_end = candidate_start_arrow.shift(seconds=self.ttl_seconds)
         return (candidate_start_arrow, candidate_end)
 
@@ -262,7 +250,7 @@ class BroadcastMessage:
     summary_md: str
     """The message message, as markdown."""
 
-    body_md: Optional[str]
+    body_md: str | None
     """The body content, as markdown."""
 
     scheduler: Scheduler

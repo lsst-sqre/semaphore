@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from markdown_it import MarkdownIt
 from pydantic import BaseModel, Field
 
@@ -18,7 +16,7 @@ class FormattedText(BaseModel):
     html: str = Field(title="The HTML-formatted text.")
 
     @classmethod
-    def from_gfm(cls, gfm_text: str, inline: bool = False) -> FormattedText:
+    def from_gfm(cls, gfm_text: str, *, inline: bool = False) -> FormattedText:
         """Create formatted text from GitHub-flavored markdown.
 
         Parameters
@@ -48,7 +46,7 @@ class BroadcastMessageModel(BaseModel):
 
     summary: FormattedText = Field(title="The message summary")
 
-    body: Optional[FormattedText] = Field(title="The body content (optional).")
+    body: FormattedText | None = Field(title="The body content (optional).")
 
     active: bool = Field(
         title="Whether the message should be displayed",

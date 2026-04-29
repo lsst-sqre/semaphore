@@ -32,22 +32,22 @@ def test_repository() -> None:
 
     assert "2" in repo
 
-    active_message_ids = set([m.identifier for m in repo.iter_active()])
-    assert active_message_ids == set(["1"])
+    active_message_ids = {m.identifier for m in repo.iter_active()}
+    assert active_message_ids == {"1"}
 
-    pending_message_ids = set([m.identifier for m in repo.iter_pending()])
-    assert pending_message_ids == set(["2"])
+    pending_message_ids = {m.identifier for m in repo.iter_pending()}
+    assert pending_message_ids == {"2"}
 
-    stale_message_ids = set([m.identifier for m in repo.iter_stale()])
+    stale_message_ids = {m.identifier for m in repo.iter_stale()}
     assert len(stale_message_ids) == 0
 
     repo.add(create_stale_message("3"))
 
-    stale_message_ids = set([m.identifier for m in repo.iter_stale()])
-    assert stale_message_ids == set(["3"])
+    stale_message_ids = {m.identifier for m in repo.iter_stale()}
+    assert stale_message_ids == {"3"}
 
     repo.remove("3")
-    assert len([m for m in repo.iter_stale()]) == 0
+    assert len(list(repo.iter_stale())) == 0
 
     repo.remove("3")  # does nothing, but doesn't raise by default either
 

@@ -9,23 +9,26 @@ of Semaphore as the `Config` object.
 
 from __future__ import annotations
 
-from enum import Enum
-from typing import Any, Mapping, Optional
+from collections.abc import Mapping
+from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseSettings, Field, SecretStr, validator
 
-# from safir.logging import configure_logging
-
-__all__ = ["Config", "Profile", "LogLevel"]
+__all__ = ["Config", "LogLevel", "Profile"]
 
 
-class Profile(str, Enum):
+class Profile(StrEnum):
+    """Logging profiles."""
+
     production = "production"
 
     development = "development"
 
 
-class LogLevel(str, Enum):
+class LogLevel(StrEnum):
+    """Logging levels."""
+
     DEBUG = "DEBUG"
 
     INFO = "INFO"
@@ -38,6 +41,8 @@ class LogLevel(str, Enum):
 
 
 class Config(BaseSettings):
+    """Configuration for Semaphore."""
+
     name: str = Field("semaphore", env="SAFIR_NAME")
 
     profile: Profile = Field(Profile.production, env="SAFIR_PROFILE")
@@ -46,19 +51,19 @@ class Config(BaseSettings):
 
     logger_name: str = Field("semaphore", env="SAFIR_LOGGER")
 
-    github_app_id: Optional[str] = Field(None, env="SEMAPHORE_GITHUB_APP_ID")
+    github_app_id: str | None = Field(None, env="SEMAPHORE_GITHUB_APP_ID")
     """The GitHub App ID, as determined by GitHub when setting up a GitHub
     App.
     """
 
-    github_webhook_secret: Optional[SecretStr] = Field(
+    github_webhook_secret: SecretStr | None = Field(
         None, env="SEMAPHORE_GITHUB_WEBHOOK_SECRET"
     )
     """The GitHub app's webhook secret, as set when the App was created. See
     https://docs.github.com/en/developers/webhooks-and-events/webhooks/securing-your-webhooks
     """
 
-    github_app_private_key: Optional[SecretStr] = Field(
+    github_app_private_key: SecretStr | None = Field(
         None, env="SEMAPHORE_GITHUB_APP_PRIVATE_KEY"
     )
     """The GitHub app private key. See
@@ -85,9 +90,7 @@ class Config(BaseSettings):
     """
 
     @validator("github_webhook_secret", "github_app_private_key", pre=True)
-    def validate_none_secret(
-        cls, v: Optional[SecretStr]
-    ) -> Optional[SecretStr]:
+    def validate_none_secret(cls, v: SecretStr | None) -> SecretStr | None:
         """Validate a SecretStr setting which may be "None" that is intended
         to be `None`.
 
@@ -114,14 +117,11 @@ class Config(BaseSettings):
             # configurations.
             return False
 
-        if (
+        return not (
             (values.get("github_app_private_key") is None)
             or (values.get("github_webhook_secret") is None)
             or (values.get("github_app_id") is None)
-        ):
-            return False
-
-        return True
+        )
 
 
 config = Config()
