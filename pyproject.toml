@@ -26,7 +26,7 @@ dependencies = [
     "fastapi-sqlalchemy",
     "gidgethub",
     "httpx",
-    "markdown-it-py[linkify,plugins]<3", # for mdformat compatibility
+    "markdown-it-py[linkify,plugins]",
     "mdformat",
     "mdformat-gfm",
     "pydantic>2",
