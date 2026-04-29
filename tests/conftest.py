@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 import pytest_asyncio
 from asgi_lifespan import LifespanManager
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 from semaphore import main
 
@@ -32,7 +32,9 @@ async def app() -> AsyncIterator[FastAPI]:
 @pytest_asyncio.fixture
 async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     """Return an ``httpx.AsyncClient`` configured to talk to the test app."""
-    async with AsyncClient(app=app, base_url="https://example.com/") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app), base_url="https://example.com/"
+    ) as client:
         yield client
 
 

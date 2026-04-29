@@ -7,7 +7,16 @@ from __future__ import annotations
 import datetime
 import enum
 import re
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Union,
+)
 
 import arrow
 import dateutil
@@ -254,7 +263,7 @@ class FreqEnum(str, enum.Enum):
     hourly = "hourly"
     minutely = "minutely"
 
-    def to_rrule_freq(self) -> int:
+    def to_rrule_freq(self) -> Literal[0, 1, 2, 3, 4, 5, 6]:
         """Converts the frequency to an integer for use as teh ``freq``
         parameter in `dateutil.rrule.rrule`."""
         return getattr(dateutil.rrule, self.name.upper())

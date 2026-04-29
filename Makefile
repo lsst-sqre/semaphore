@@ -1,28 +1,29 @@
-# The dependencies need --allow-unsafe because sphinx and gunicorn depend on
-# setuptools, which is normally not allowed to appear in a hashed dependency
-# file.
-.PHONY: update-deps
-update-deps:
-	python -m pip install --upgrade pip-tools pip setuptools
-	pip-compile --upgrade --resolver=backtracking --build-isolation --allow-unsafe --generate-hashes --output-file requirements/main.txt requirements/main.in
-	pip-compile --upgrade --resolver=backtracking --build-isolation --allow-unsafe --generate-hashes --output-file requirements/dev.txt requirements/dev.in
+.PHONY: help
+help:
+	@echo "Make targets for Semaphore"
+	@echo "make init - Set up dev environment"
+	@echo "make update - Update pinned dependencies and run make init"
+	@echo "make update-deps - Update pinned dependencies"
 
-# npm dependencies have to be installed for pre-commit eslint to work.
 .PHONY: init
 init:
-	python -m pip install --editable .
-	python -m pip install --upgrade -r requirements/main.txt -r requirements/dev.txt
-	rm -rf .tox
-	pip install --upgrade tox pre-commit
-	pre-commit install
+	uv sync --frozen --all-groups
+	uv run pre-commit install
+
+# This is defined as a Makefile target instead of only a tox command because
+# if the command fails we want to cat output.txt, which contains the
+# actually useful linkcheck output. tox unfortunately doesn't support this
+# level of shell trickery after failed commands.
+.PHONY: linkcheck
+linkcheck:
+	sphinx-build -W --keep-going -n -T -b linkcheck docs	\
+	    docs/_build/linkcheck				\
+	    || (cat docs/_build/linkcheck/output.txt; exit 1)
 
 .PHONY: update
 update: update-deps init
 
-.PHONY: docs
-docs:
-	tox -e docs
-
-.PHONY: run
-run:
-	tox -e run
+.PHONY: update-deps
+update-deps:
+	uv lock --upgrade
+	uv run --only-group=lint pre-commit autoupdate
