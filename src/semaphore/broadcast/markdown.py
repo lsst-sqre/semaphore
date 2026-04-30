@@ -211,6 +211,23 @@ class BroadcastMarkdown:
             category=self.metadata.category,
         )
 
+    def _make_ruleset(
+        self, rules: list[RecurringRule]
+    ) -> dateutil.rrule.rruleset:
+        rset = dateutil.rrule.rruleset(cache=True)
+        for rule in rules:
+            if rule.date is not None:
+                if rule.exclude:
+                    rset.exdate(rule.to_datetime())
+                else:
+                    rset.rdate(rule.to_datetime())
+            elif isinstance(rule, RecurringRule):
+                if rule.exclude:
+                    rset.exrule(rule.to_rrule())
+                else:
+                    rset.rrule(rule.to_rrule())
+        return rset
+
     def _make_scheduler(self) -> Scheduler:
         if self.metadata.defer is not None:
             if self.metadata.expire is not None:
@@ -228,19 +245,7 @@ class BroadcastMarkdown:
             # none, so it is a fixed-expiration scheduler
             return FixedExpirationScheduler(self.metadata.expire)
         elif self.metadata.rules is not None and self.metadata.ttl is not None:
-            # Create a rruleset
-            rset = dateutil.rrule.rruleset(cache=True)
-            for rule in self.metadata.rules:
-                if rule.date is not None:
-                    if rule.exclude:
-                        rset.exdate(rule.to_datetime())
-                    else:
-                        rset.rdate(rule.to_datetime())
-                elif isinstance(rule, RecurringRule):
-                    if rule.exclude:
-                        rset.exrule(rule.to_rrule())
-                    else:
-                        rset.rrule(rule.to_rrule())
+            rset = self._make_ruleset(self.metadata.rules)
             return RecurringScheduler(rruleset=rset, ttl=self.metadata.ttl)
         else:
             return PermaScheduler()

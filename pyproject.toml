@@ -140,12 +140,6 @@ python_files = ["tests/*.py", "tests/*/*.py"]
 [tool.ruff]
 extend = "ruff-shared.toml"
 
-[tool.ruff.lint.extend-per-file-ignores]
-"src/semaphore/broadcast/markdown.py" = [
-    "C901",    # temporary
-    "PLR0912", # temporary
-]
-
 [tool.ruff.lint.isort]
 known-first-party = ["semaphore", "tests"]
 
