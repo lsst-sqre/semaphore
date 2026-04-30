@@ -142,21 +142,8 @@ extend = "ruff-shared.toml"
 
 [tool.ruff.lint.extend-per-file-ignores]
 "src/semaphore/broadcast/markdown.py" = [
-    "N805",    # temporary
     "C901",    # temporary
     "PLR0912", # temporary
-]
-"src/semaphore/config.py" = [
-    "FBT001",  # temporary
-    "N805",    # temporary
-]
-"src/semaphore/github/broadcastservices.py" = [
-    "PTH119",  # temporary
-    "PTH122",  # temporary
-    "PTH120",  # temporary
-]
-"tests/broadcast/markdown_test.py" = [
-    "DTZ001",  # temporary
 ]
 
 [tool.ruff.lint.isort]
