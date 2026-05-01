@@ -24,7 +24,7 @@ class BroadcastMessageRepository:
 
     Parameters
     ----------
-    messages : sequence of `BroadcastMessage`, optional
+    messages
         Bootstrap the repository with these messages, optionally. Messages
         can always be added later using the `add` method.
     """
@@ -43,7 +43,7 @@ class BroadcastMessageRepository:
 
         Parameters
         ----------
-        message : `semaphore.broadcast.models.BroadcastMessage`
+        message
             Description
         """
         self._messages[message.identifier] = message
@@ -56,12 +56,12 @@ class BroadcastMessageRepository:
 
         Parameters
         ----------
-        identifier : hashable
+        identifier
             The message's identifier.
 
         Returns
         -------
-        `semaphore.broadcast.models.BroadcastMessage`
+        BroadcastMessage
             The broadcast message.
 
         Raises
@@ -76,7 +76,7 @@ class BroadcastMessageRepository:
 
         Parameters
         ----------
-        identifier : hashable
+        identifier
             The message's identifier.
 
         Returns

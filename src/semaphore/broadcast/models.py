@@ -113,14 +113,14 @@ class OneTimeScheduler(Scheduler):
 
         Parameters
         ----------
-        start : `arrow.Arrow`
+        start
             A start date as an arrow object.
-        ttl : `datetime.timedela`
+        ttl
             The duration of the event.
 
         Returns
         -------
-        `OneTimeScheduler`
+        OneTimeScheduler
             The scheduler.
         """
         end = start.shift(seconds=ttl.total_seconds())
@@ -138,12 +138,12 @@ class RecurringScheduler(Scheduler):
 
     Parameters
     ----------
-    rruleset : `dateutil.rrule.rruleset`
+    rruleset
         A recurrence ruleset from the dateutil package. Rulesets can contain
         both repeats, one-time dates, one-time exclusions, and so on. The
         rruleset **must** have a UTC timezone. Time zones are not validated
         by the constructor.
-    ttl : `datetime.timedela`
+    ttl
         The duration of the event.
     """
 

@@ -34,7 +34,7 @@ def get_app_jwt() -> str:
 
     Parameters
     ----------
-    http_client : httpx.AsyncClient
+    http_client
         The httpx client.
 
     Returns
@@ -67,15 +67,16 @@ def create_github_client(
 
     Parameters
     ----------
-    http_client : httpx.AsyncClient
+    http_client
         The httpx client.
-    oauth_token : str, optional
+    oauth_token
         If set, the client is authenticated with the oauth token (common
         for clients acting as an app installation or on behalf of a user).
 
     Returns
     -------
     gidgethub.httpx.GitHubAPI
+        Created GitHub client.
     """
     return GitHubAPI(
         http_client, "lsst-sqre/semaphore", oauth_token=oauth_token
@@ -91,9 +92,9 @@ async def create_github_installation_client(
 
     Parameters
     ----------
-    http_client : httpx.AsyncClient
+    http_client
         The httpx client.
-    installation_id : str
+    installation_id
         The installation ID, often obtained from a webhook payload
         (``installation.id`` path), or from the ``id`` key returned by
         `iter_installations`.

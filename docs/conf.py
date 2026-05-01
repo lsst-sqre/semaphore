@@ -4,7 +4,7 @@ from urllib.parse import quote, urlencode
 from documenteer.conf.guide import *
 
 
-def create_github_app_qs(domain="data-dev.lsst.cloud"):
+def create_github_app_qs(domain: str = "data-dev.lsst.cloud") -> str:
     """Create a URL query string with the GitHub App configuration.
 
     See
@@ -12,13 +12,13 @@ def create_github_app_qs(domain="data-dev.lsst.cloud"):
 
     Parameters
     ----------
-    domain : `str`, optional
+    domain
         The domain name of the RSP environment. This is used to template some
         of the GitHub App configuration.
 
     Returns
     -------
-    qs : `str`
+    str
         The query string with the GitHub App configuration.
     """
     parameters = [
@@ -43,20 +43,22 @@ def create_github_app_qs(domain="data-dev.lsst.cloud"):
     return urlencode(parameters, quote_via=quote)
 
 
-def format_org_url(org="lsst-sqre", domain="data-dev.lsst.cloud"):
+def format_org_url(
+    org: str = "lsst-sqre", domain: str = "data-dev.lsst.cloud"
+) -> str:
     """Format the URL creating the app for an organization.
 
     Parameters
     ----------
-    org : `str`, optional
+    org
         The GitHub organization name where the app is created.
-    domain : `str`, optional
+    domain
         The domain name of the RSP environment. This is used to template some
         of the GitHub App configuration.
 
     Returns
     -------
-    url : `str`
+    str
         The URL to create the GitHub App.
     """
     qs = create_github_app_qs(domain=domain)
@@ -64,18 +66,18 @@ def format_org_url(org="lsst-sqre", domain="data-dev.lsst.cloud"):
     return url
 
 
-def format_personal_url(domain="data-dev.lsst.cloud"):
+def format_personal_url(domain: str = "data-dev.lsst.cloud") -> str:
     """Format the URL creating the app for a user account.
 
     Parameters
     ----------
-    domain : `str`, optional
+    domain
         The domain name of the RSP environment. This is used to template some
         of the GitHub App configuration.
 
     Returns
     -------
-    url : `str`
+    str
         The URL to create the GitHub App.
     """
     qs = create_github_app_qs(domain=domain)

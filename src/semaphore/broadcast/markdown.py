@@ -78,10 +78,10 @@ class BroadcastMarkdown:
 
     Properties
     ----------
-    text : `str`
+    text
         The content of the markdown message (including YAML-formatted
         front-matter).
-    identifier : `str`
+    identifier
         A unique identifier that is associated with the markdown content.
     """
 
@@ -136,12 +136,12 @@ class BroadcastMarkdown:
 
         Parameters
         ----------
-        env_name : `str`
+        env_name
             Name of the Phalanx environment (e.g., `idf-prod`).
 
         Returns
         -------
-        `bool`
+        bool
             `True`, if the message should be included in that environment's
             broadcast message. `False` otherwise.
         """
@@ -683,7 +683,7 @@ def convert_to_tzinfo(v: Any) -> datetime.tzinfo:
 
     Parameters
     ----------
-    v : datetime.tzinfo, str
+    v
         A value to convert into a timezone.
     """
     if isinstance(v, datetime.tzinfo):
@@ -708,9 +708,9 @@ def convert_to_arrow(
 
     Parameters
     ----------
-    v : datetime.date, datetime.datetime, str
+    v
         A value to convert into a datetime.
-    default_tz : datetime.tzinfo
+    default_tz
         A default timezone. If neither ``v`` has a timezone or ``default_tz``
         is set, the default timezone is UTC.
     """
@@ -752,7 +752,7 @@ def convert_to_timedelta(v: Any) -> datetime.timedelta | None:
 
     Parameters
     ----------
-    v : datetime.timedelta, str
+    v
         A value to convert into a timedelta.
     """
     if v is None:
