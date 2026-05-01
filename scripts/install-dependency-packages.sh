@@ -24,5 +24,8 @@ export DEBIAN_FRONTEND=noninteractive
 # Update the package listing, so we know what packages exist:
 apt-get update
 
-# Required to build binary Python modules.
-apt-get -y install --no-install-recommends build-essential
+# Install various dependencies needed to install Semaphore.
+#
+# build-essential: sometimes needed to build Python modules
+# git: required by setuptools-scm
+apt-get -y install --no-install-recommends build-essential git

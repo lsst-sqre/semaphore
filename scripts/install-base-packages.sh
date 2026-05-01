@@ -25,10 +25,3 @@ apt-get update
 
 # Install security updates:
 apt-get -y upgrade
-
-# git is required by setuptools-scm.  libpq-dev is required by psycopg2.
-apt-get -y install --no-install-recommends git libpq-dev
-
-# Delete cached files we don't need anymore:
-apt-get clean
-rm -rf /var/lib/apt/lists/*
