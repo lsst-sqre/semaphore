@@ -16,7 +16,9 @@ FROM python:3.14.4-slim-trixie AS base-image
 
 # Update system packages
 COPY scripts/install-base-packages.sh .
-RUN ./install-base-packages.sh && rm ./install-base-packages.sh
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    ./install-base-packages.sh && rm ./install-base-packages.sh
 
 FROM base-image AS install-image
 
@@ -25,7 +27,9 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.6 /uv /bin/uv
 
 # Install some additional packages required for building dependencies.
 COPY scripts/install-dependency-packages.sh .
-RUN ./install-dependency-packages.sh
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    ./install-dependency-packages.sh
 
 # Disable hard links during uv package installation since we're using a
 # cache on a separate file system.
