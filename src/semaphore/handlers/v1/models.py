@@ -21,14 +21,14 @@ class FormattedText(BaseModel):
 
         Parameters
         ----------
-        gfm_text : `str`
+        gfm_text
             GitHub flavored markdown.
-        inline : `bool`
+        inline
             If `True`, no paragraph tags are added to the HTML content.
 
         Returns
         -------
-        `FormattedText`
+        FormattedText
             The formatted text, containing both markdown and HTML renderings.
         """
         md_parser = MarkdownIt("gfm-like")
@@ -81,12 +81,12 @@ class BroadcastMessageModel(BaseModel):
 
         Parameters
         ----------
-        message : `semaphore.broadcast.models.BroadcastMessage`
+        message
             The message domain model, usually obtained from a repository.
 
         Returns
         -------
-        `BroadcastMessageModel`
+        BroadcastMessageModel
             The message entity for the v1 API.
         """
         formatted_summary = FormattedText.from_gfm(message.summary_md)

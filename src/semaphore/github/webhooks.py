@@ -34,11 +34,11 @@ async def handle_push_event(
 
     Parameters
     ----------
-    event : `gidgethub.sansio.Event`
+    event
         The parsed event payload.
-    broadcast_repo : ``BroadcastMessageRepository``
+    broadcast_repo
         The broadcast message repository.
-    github_client : `gidgethub.httpx.GitHubAPI`
+    github_client
         The GitHub API client, pre-authorized as an app installation.
     logger
         The logger instance

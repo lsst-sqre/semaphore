@@ -91,11 +91,11 @@ async def update_broadcast_repo_from_push_event(
 
     Parameters
     ----------
-    event : `gidgethub.sansio.Event`
+    event
         The parsed event payload.
-    broadcast_repo : ``BroadcastMessageRepository``
+    broadcast_repo
         The broadcast message repository.
-    github_client : `gidgethub.httpx.GitHubAPI`
+    github_client
         The GitHub API client, pre-authorized as an app installation.
     logger
         The logger instance
@@ -177,7 +177,7 @@ def is_broadcast_message(github_path: str) -> bool:
 
     Parameters
     ----------
-    github_path : `str`
+    github_path
         Posix file path in a GitHub repository.
 
     Returns
@@ -214,16 +214,16 @@ async def add_file_to_repository(
 
     Parameters
     ----------
-    file_path : str
+    file_path
         Posix path of the message's file in GitHub.
-    message_ref : `GitHubMessageRef`
+    message_ref
         Reference for the message.
-    contents_url : `str`
+    contents_url
         The URI template for the repository's contents (the template
         includs a ``path`` variable).
-    broadcast_repo : ``BroadcastMessageRepository``
+    broadcast_repo
         The broadcast message repository.
-    github_client : `gidgethub.httpx.GitHubAPI`
+    github_client
         The GitHub API client, pre-authorized as an app installation.
     logger
         The logger instance
@@ -282,9 +282,9 @@ async def bootstrap_broadcast_repo(
 
     Parameters
     ----------
-    http_client : httpx.AsyncClient
+    http_client
         The httpx client.
-    broadcast_repo : ``BroadcastMessageRepository``
+    broadcast_repo
         The broadcast message repository.
     logger
         The logger instance.
@@ -330,9 +330,9 @@ async def iter_installations(
 
     Parameters
     ----------
-    github_client : `gidgethub.httpx.GitHubAPI`
+    github_client
         The GitHub client.
-    jwt : `str`
+    jwt
         The JWT for the GitHub application. See `get_app_jwt`.
 
     Yields
@@ -357,7 +357,7 @@ async def iter_installation_repositories(
 
     Parameters
     ----------
-    github_client : `gidgethub.httpx.GitHubAPI`
+    github_client
         The GitHub client that is pre-authorized with an installation ID,
         see `create_github_installation_client`.
 
@@ -383,14 +383,14 @@ async def iter_repo_dir_contents(
 
     Parameters
     ----------
-    github_client : `gidgethub.httpx.GitHubAPI`
+    github_client
         The GitHub client that is pre-authorized with an installation ID,
         see `create_github_installation_client`.
-    contents_url : `str`
+    contents_url
         The contents URL for the repository, which is a templated URI,
         Example:
         ``https://api.github.com/repos/lsst-sqre/semaphore-demo/contents/{+path}``
-    directory_path : `str`
+    directory_path
         The directory path to iterate in.
 
     Yields
