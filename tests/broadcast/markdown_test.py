@@ -14,7 +14,6 @@ from pydantic import ValidationError
 from semaphore.broadcast.markdown import (
     BroadcastMarkdown,
     BroadcastMarkdownFrontMatter,
-    parse_timedelta,
 )
 from semaphore.broadcast.models import (
     FixedExpirationScheduler,
@@ -26,44 +25,6 @@ from semaphore.broadcast.models import (
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        ("1w", datetime.timedelta(weeks=1)),
-        ("1week", datetime.timedelta(weeks=1)),
-        ("2weeks", datetime.timedelta(weeks=2)),
-        ("1d", datetime.timedelta(days=1)),
-        ("1day", datetime.timedelta(days=1)),
-        ("2days", datetime.timedelta(days=2)),
-        ("1h", datetime.timedelta(hours=1)),
-        ("1hr", datetime.timedelta(hours=1)),
-        ("1hour", datetime.timedelta(hours=1)),
-        ("1hours", datetime.timedelta(hours=1)),
-        ("1m", datetime.timedelta(minutes=1)),
-        ("1min", datetime.timedelta(minutes=1)),
-        ("1mins", datetime.timedelta(minutes=1)),
-        ("1minute", datetime.timedelta(minutes=1)),
-        ("1minutes", datetime.timedelta(minutes=1)),
-        ("1s", datetime.timedelta(seconds=1)),
-        ("1sec", datetime.timedelta(seconds=1)),
-        ("1secs", datetime.timedelta(seconds=1)),
-        ("1second", datetime.timedelta(seconds=1)),
-        ("1seconds", datetime.timedelta(seconds=1)),
-        ("1w1d1h1m", datetime.timedelta(weeks=1, days=1, hours=1, minutes=1)),
-        (
-            "1w 1d 1h 1m",
-            datetime.timedelta(weeks=1, days=1, hours=1, minutes=1),
-        ),
-        ("2days 6hr", datetime.timedelta(days=2, hours=6)),
-        ("1w 2d 6hours", datetime.timedelta(weeks=1, days=2, hours=6)),
-        ("1 week 2 days 6hours", datetime.timedelta(weeks=1, days=2, hours=6)),
-    ],
-)
-def test_parse_timedelta(value: str, expected: datetime.timedelta) -> None:
-    td = parse_timedelta(value)
-    assert td == expected
 
 
 def test_evergreen(broadcasts_dir: Path) -> None:

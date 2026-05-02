@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import datetime
 import enum
-import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 
@@ -27,6 +26,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from safir.pydantic import HumanTimedelta
 
 from .models import (
     BroadcastCategory,
@@ -51,25 +51,6 @@ front matter.
 
 See https://markdown-it-py.readthedocs.io/en/latest/using.html#the-parser
 """
-timespan_pattern = re.compile(
-    r"((?P<weeks>\d+?)\s*(weeks|week|w))?\s*"
-    r"((?P<days>\d+?)\s*(days|day|d))?\s*"
-    r"((?P<hours>\d+?)\s*(hours|hour|hr|h))?\s*"
-    r"((?P<minutes>\d+?)\s*(minutes|minute|mins|min|m))?\s*"
-    r"((?P<seconds>\d+?)\s*(seconds|second|secs|sec|s))?$"
-)
-"""Regular expression pattern for a time duration."""
-
-
-def parse_timedelta(text: str) -> datetime.timedelta:
-    """Parse a `datetime.timedelta` from a string containing integer numbers
-    of weeks, days, hours, minutes, and seconds.
-    """
-    m = timespan_pattern.match(text.strip())
-    if m is None:
-        raise ValueError(f"Could not parse a timespan from {text!r}.")
-    td_args = {k: int(v) for k, v in m.groupdict().items() if v is not None}
-    return datetime.timedelta(**td_args)
 
 
 class BroadcastMarkdown:
@@ -590,9 +571,7 @@ class BroadcastMarkdownFrontMatter(BaseModel):
     expire: arrow.Arrow | None = None
     """Date when the message expires."""
 
-    ttl: Annotated[
-        datetime.timedelta | None, PlainValidator(convert_to_timedelta)
-    ] = None
+    ttl: HumanTimedelta | None = None
     """Time duration if `expire` is not set with `defer`."""
 
     rules: list[RecurringRule] | None = None
@@ -741,25 +720,3 @@ def convert_to_arrow(
         return arrow.get(dt, default_tz)
     else:
         return arrow.get(dt, dateutil.tz.UTC)
-
-
-def convert_to_timedelta(v: Any) -> datetime.timedelta | None:
-    """Convert a value to a datetime.timedelta.
-
-    This function is intended to be used in a validator for Pydantic models,
-    and will raise ValueErrors or TypeErrors if ``v`` is not an appropriate
-    value.
-
-    Parameters
-    ----------
-    v
-        A value to convert into a timedelta.
-    """
-    if v is None:
-        return None
-    elif isinstance(v, str):
-        return parse_timedelta(v)
-    elif isinstance(v, datetime.timedelta):
-        return v
-    else:
-        raise TypeError(f"Cannot parse timedelta from {v!r}")
