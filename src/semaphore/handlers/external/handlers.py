@@ -11,6 +11,7 @@ from gidgethub.sansio import Event
 from safir.dependencies.http_client import http_client_dependency
 from safir.dependencies.logger import logger_dependency
 from safir.metadata import get_metadata
+from safir.slack.webhook import SlackRouteErrorHandler
 from structlog.stdlib import BoundLogger
 
 from semaphore.broadcast.repository import BroadcastMessageRepository
@@ -21,9 +22,9 @@ from semaphore.github.webhooks import router as webhook_router
 
 from .models import Index
 
-__all__ = ["get_index", "post_github_webhook"]
+__all__ = ["router"]
 
-router = APIRouter(prefix=f"/{config.name}")
+router = APIRouter(route_class=SlackRouteErrorHandler)
 """FastAPI router for all external handlers.
 
 These routes have paths prefixed by the application name.
@@ -41,9 +42,7 @@ These routes have paths prefixed by the application name.
     response_model_exclude_none=True,
     tags=["internal"],
 )
-async def get_index(
-    logger: Annotated[BoundLogger, Depends(logger_dependency)],
-) -> Index:
+async def get_index() -> Index:
     """GET ``/semaphore/`` (the app's external root).
 
     This handler provides metadata and other top-level URLs, such as
@@ -54,15 +53,14 @@ async def get_index(
     internal root endpoint.
     """
     metadata = get_metadata(
-        package_name="semaphore",
-        application_name=config.name,
+        package_name="semaphore", application_name=config.name
     )
     return Index(
         metadata=metadata,
         github_app_id=config.github_app_id,
         github_app_enabled=config.enable_github_app,
-        api_docs_path=f"/{config.name}/docs",
-        openapi_path=f"/{config.name}/openapi.json",
+        api_docs_path=f"/{config.path_prefix}/docs",
+        openapi_path=f"/{config.path_prefix}/openapi.json",
     )
 
 

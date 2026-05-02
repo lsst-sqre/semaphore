@@ -5,14 +5,14 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from safir.slack.webhook import SlackRouteErrorHandler
 
 from semaphore.broadcast.repository import BroadcastMessageRepository
-from semaphore.config import config
 from semaphore.dependencies.broadcastrepo import broadcast_repo_dependency
 
 from .models import BroadcastMessageModel
 
-router = APIRouter(prefix=f"/{config.name}/v1")
+router = APIRouter(route_class=SlackRouteErrorHandler)
 """FastAPI router for all v1 REST API endpoints."""
 
 
