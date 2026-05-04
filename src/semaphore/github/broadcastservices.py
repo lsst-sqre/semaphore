@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from gidgethub import GitHubException, RateLimitExceeded
 from gidgethub.sansio import accept_format
@@ -54,7 +54,7 @@ class GitHubMessageRef:
     """Git ref (e.g. ``refs/heads/main``)"""
 
     @classmethod
-    def from_push_event(cls, *, path: str, event: Event) -> GitHubMessageRef:
+    def from_push_event(cls, *, path: str, event: Event) -> Self:
         return cls(
             path=path,
             repo_name=event.data["repository"]["name"],
