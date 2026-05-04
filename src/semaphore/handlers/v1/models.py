@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Self
+
 from markdown_it import MarkdownIt
 from pydantic import BaseModel, Field
 
@@ -16,7 +18,7 @@ class FormattedText(BaseModel):
     html: str = Field(title="The HTML-formatted text.")
 
     @classmethod
-    def from_gfm(cls, gfm_text: str, *, inline: bool = False) -> FormattedText:
+    def from_gfm(cls, gfm_text: str, *, inline: bool = False) -> Self:
         """Create formatted text from GitHub-flavored markdown.
 
         Parameters
@@ -73,9 +75,7 @@ class BroadcastMessageModel(BaseModel):
     category: BroadcastCategory = Field(title="Category of the message.")
 
     @classmethod
-    def from_broadcast_message(
-        cls, message: BroadcastMessage
-    ) -> BroadcastMessageModel:
+    def from_broadcast_message(cls, message: BroadcastMessage) -> Self:
         """Create a v1 API BroadcastMessageModel from a broadcast message
         domain model.
 
