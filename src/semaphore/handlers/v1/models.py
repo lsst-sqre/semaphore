@@ -7,7 +7,7 @@ from typing import Self
 from markdown_it import MarkdownIt
 from pydantic import BaseModel, Field
 
-from semaphore.broadcast.models import BroadcastCategory, BroadcastMessage
+from ...broadcast.models import BroadcastCategory, BroadcastMessage
 
 
 class FormattedText(BaseModel):

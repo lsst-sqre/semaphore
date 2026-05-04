@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import gidgethub.apps
 from gidgethub.httpx import GitHubAPI
 
-from semaphore.config import config
+from ..config import config
 
 if TYPE_CHECKING:
     import httpx.AsyncClient

@@ -10,9 +10,8 @@ from typing import TYPE_CHECKING, Any, Self
 from gidgethub import GitHubException, RateLimitExceeded
 from gidgethub.sansio import accept_format
 
-from semaphore.broadcast.markdown import BroadcastMarkdown
-from semaphore.config import config
-
+from ..broadcast.markdown import BroadcastMarkdown
+from ..config import config
 from .client import (
     create_github_client,
     create_github_installation_client,
