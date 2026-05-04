@@ -6,7 +6,7 @@ import datetime
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, cast, override
 
 import arrow
 
@@ -60,9 +60,11 @@ class Scheduler(ABC):
 class PermaScheduler(Scheduler):
     """A scheduler that is always active."""
 
+    @override
     def is_active(self) -> bool:
         return True
 
+    @override
     def has_future_events(self) -> bool:
         return False
 
@@ -74,9 +76,11 @@ class FixedExpirationScheduler(Scheduler):
     end: arrow.Arrow
     """The end date."""
 
+    @override
     def is_active(self) -> bool:
         return arrow.utcnow() < self.end
 
+    @override
     def has_future_events(self) -> bool:
         return False
 
@@ -88,9 +92,11 @@ class OpenEndedScheduler(Scheduler):
     start: arrow.Arrow
     """The start date."""
 
+    @override
     def is_active(self) -> bool:
         return arrow.utcnow() >= self.start
 
+    @override
     def has_future_events(self) -> bool:
         return arrow.utcnow() < self.start
 
@@ -126,9 +132,11 @@ class OneTimeScheduler(Scheduler):
         end = start.shift(seconds=ttl.total_seconds())
         return cls(start, end)
 
+    @override
     def is_active(self) -> bool:
         return arrow.utcnow().is_between(self.start, self.end, bounds="[)")
 
+    @override
     def has_future_events(self) -> bool:
         return self.start > arrow.utcnow()
 
@@ -182,10 +190,12 @@ class RecurringScheduler(Scheduler):
         """The end time of the current event."""
         return self._start.shift(seconds=self.ttl_seconds)
 
+    @override
     def is_active(self) -> bool:
         self._refresh()
         return arrow.utcnow().is_between(self._start, self._end, bounds="[)")
 
+    @override
     def has_future_events(self) -> bool:
         now = arrow.utcnow()
         if now < self._start:
