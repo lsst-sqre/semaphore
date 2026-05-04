@@ -14,12 +14,11 @@ from safir.metadata import get_metadata
 from safir.slack.webhook import SlackRouteErrorHandler
 from structlog.stdlib import BoundLogger
 
-from semaphore.broadcast.repository import BroadcastMessageRepository
-from semaphore.config import config
-from semaphore.dependencies.broadcastrepo import broadcast_repo_dependency
-from semaphore.github.client import create_github_installation_client
-from semaphore.github.webhooks import router as webhook_router
-
+from ...broadcast.repository import BroadcastMessageRepository
+from ...config import config
+from ...dependencies.broadcastrepo import broadcast_repo_dependency
+from ...github.client import create_github_installation_client
+from ...github.webhooks import router as webhook_router
 from .models import Index
 
 __all__ = ["router"]

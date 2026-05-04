@@ -7,9 +7,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from safir.slack.webhook import SlackRouteErrorHandler
 
-from semaphore.broadcast.repository import BroadcastMessageRepository
-from semaphore.dependencies.broadcastrepo import broadcast_repo_dependency
-
+from ...broadcast.repository import BroadcastMessageRepository
+from ...dependencies.broadcastrepo import broadcast_repo_dependency
 from .models import BroadcastMessageModel
 
 router = APIRouter(route_class=SlackRouteErrorHandler)

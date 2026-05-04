@@ -3,7 +3,7 @@
 This FastAPI dependency provides a repository to request handlers.
 """
 
-from semaphore.broadcast.repository import BroadcastMessageRepository
+from ..broadcast.repository import BroadcastMessageRepository
 
 __all__ = ["BroadcastRepoDependency", "broadcast_repo_dependency"]
 
