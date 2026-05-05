@@ -1,7 +1,5 @@
 """Test the semaphore.broadcast.repository module."""
 
-from __future__ import annotations
-
 import pytest
 
 from semaphore.broadcast.repository import (

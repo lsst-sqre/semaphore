@@ -1,7 +1,5 @@
 """Configuration for Semaphore."""
 
-from __future__ import annotations
-
 from typing import Self
 
 from pydantic import Field, SecretStr, field_validator, model_validator

@@ -1,7 +1,5 @@
 """Tests for the semaphore.broadcast.models module."""
 
-from __future__ import annotations
-
 import datetime
 
 import arrow

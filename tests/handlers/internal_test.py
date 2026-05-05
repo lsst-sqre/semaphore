@@ -1,15 +1,9 @@
 """Tests for the semaphore.handlers.internal module and routes."""
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
 import pytest
+from httpx import AsyncClient
 
 from semaphore.config import config
-
-if TYPE_CHECKING:
-    from httpx import AsyncClient
 
 
 @pytest.mark.asyncio

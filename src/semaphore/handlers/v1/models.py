@@ -1,7 +1,5 @@
 """Models for the v1 REST API."""
 
-from __future__ import annotations
-
 from typing import Self
 
 from markdown_it import MarkdownIt

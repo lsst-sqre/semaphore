@@ -1,21 +1,15 @@
 """Pytest fixtures."""
 
-from __future__ import annotations
-
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
 from asgi_lifespan import LifespanManager
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from semaphore import main
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
-    from fastapi import FastAPI
 
 
 @pytest_asyncio.fixture

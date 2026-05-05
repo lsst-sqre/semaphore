@@ -1,7 +1,5 @@
 """Test utilities for creating sample broadcasts."""
 
-from __future__ import annotations
-
 import arrow
 
 from semaphore.broadcast.models import (
