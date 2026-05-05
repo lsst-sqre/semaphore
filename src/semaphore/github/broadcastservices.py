@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
@@ -324,7 +324,7 @@ async def bootstrap_broadcast_repo(
 
 async def iter_installations(
     *, github_client: GitHubAPI, jwt: str
-) -> AsyncIterator[dict[str, Any]]:
+) -> AsyncGenerator[dict[str, Any]]:
     """Iterate over the GitHub app installations.
 
     Parameters
@@ -350,7 +350,7 @@ async def iter_installations(
 async def iter_installation_repositories(
     *,
     github_client: GitHubAPI,
-) -> AsyncIterator[dict[str, Any]]:
+) -> AsyncGenerator[dict[str, Any]]:
     """Iterate over repositories that the GitHub app installation has access
     to.
 
@@ -377,7 +377,7 @@ async def iter_installation_repositories(
 
 async def iter_repo_dir_contents(
     github_client: GitHubAPI, contents_url: str, directory_path: str
-) -> AsyncIterator[dict[str, Any]]:
+) -> AsyncGenerator[dict[str, Any]]:
     """Iterate over content objects in a repository in a GitHub repository.
 
     Parameters

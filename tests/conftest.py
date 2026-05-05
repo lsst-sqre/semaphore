@@ -13,13 +13,13 @@ from httpx import ASGITransport, AsyncClient
 from semaphore import main
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from fastapi import FastAPI
 
 
 @pytest_asyncio.fixture
-async def app() -> AsyncIterator[FastAPI]:
+async def app() -> AsyncGenerator[FastAPI]:
     """Return a configured test application.
 
     Wraps the application in a lifespan manager so that startup and shutdown
@@ -30,7 +30,7 @@ async def app() -> AsyncIterator[FastAPI]:
 
 
 @pytest_asyncio.fixture
-async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
+async def client(app: FastAPI) -> AsyncGenerator[AsyncClient]:
     """Return an ``httpx.AsyncClient`` configured to talk to the test app."""
     async with AsyncClient(
         transport=ASGITransport(app), base_url="https://example.com/"
