@@ -14,8 +14,10 @@ from fastapi.openapi.utils import get_openapi
 from safir.dependencies.http_client import http_client_dependency
 from safir.logging import configure_logging, configure_uvicorn_logging
 from safir.middleware.x_forwarded import XForwardedMiddleware
+from safir.sentry import initialize_sentry
 from safir.slack.webhook import SlackRouteErrorHandler
 
+from . import __version__
 from .config import config
 from .dependencies.broadcastrepo import broadcast_repo_dependency
 from .github.broadcastservices import bootstrap_broadcast_repo
@@ -24,6 +26,8 @@ from .handlers.internal import internal_router
 from .handlers.v1 import v1_router
 
 __all__ = ["app"]
+
+initialize_sentry(release=__version__)
 
 configure_logging(
     profile=config.log_profile, log_level=config.log_level, name="semaphore"
