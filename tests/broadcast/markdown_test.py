@@ -2,12 +2,12 @@
 
 import datetime
 from datetime import UTC
-from pathlib import Path
 
 import arrow
 import dateutil
 import pytest
 from pydantic import ValidationError
+from safir.testing.data import Data
 
 from semaphore.broadcast.markdown import (
     BroadcastMarkdown,
@@ -22,9 +22,9 @@ from semaphore.broadcast.models import (
 )
 
 
-def test_evergreen(broadcasts_dir: Path) -> None:
+def test_evergreen(data: Data) -> None:
     source_path = "evergreen.md"
-    text = broadcasts_dir.joinpath(source_path).read_text()
+    text = data.read_text(f"broadcasts/{source_path}")
 
     expected_summary = "The markdown-formatted broadcast message."
     expected_body = (
@@ -48,9 +48,9 @@ def test_evergreen(broadcasts_dir: Path) -> None:
     assert broadcast.category == "notice"
 
 
-def test_evergreen_no_body(broadcasts_dir: Path) -> None:
+def test_evergreen_no_body(data: Data) -> None:
     source_path = "evergreen-no-body.md"
-    text = broadcasts_dir.joinpath(source_path).read_text()
+    text = data.read_text(f"broadcasts/{source_path}")
 
     expected_summary = "This message doesn't have body content."
     expected_body = None
@@ -69,9 +69,9 @@ def test_evergreen_no_body(broadcasts_dir: Path) -> None:
     assert broadcast.stale is False
 
 
-def test_evergreen_disabled(broadcasts_dir: Path) -> None:
+def test_evergreen_disabled(data: Data) -> None:
     source_path = "evergreen-disabled.md"
-    text = broadcasts_dir.joinpath(source_path).read_text()
+    text = data.read_text(f"broadcasts/{source_path}")
 
     md = BroadcastMarkdown(text, source_path)
     broadcast = md.to_broadcast()
@@ -79,9 +79,9 @@ def test_evergreen_disabled(broadcasts_dir: Path) -> None:
     assert broadcast.scheduler.is_active() is True
 
 
-def test_evergreen_info(broadcasts_dir: Path) -> None:
+def test_evergreen_info(data: Data) -> None:
     source_path = "evergreen-info.md"
-    text = broadcasts_dir.joinpath(source_path).read_text()
+    text = data.read_text(f"broadcasts/{source_path}")
 
     expected_summary = "Informational markdown-formatted broadcast message."
     expected_body_pre = (
@@ -110,9 +110,9 @@ def test_evergreen_info(broadcasts_dir: Path) -> None:
     assert broadcast.category == "info"
 
 
-def test_env_list(broadcasts_dir: Path) -> None:
+def test_env_list(data: Data) -> None:
     source_path = "env-list.md"
-    text = broadcasts_dir.joinpath(source_path).read_text()
+    text = data.read_text(f"broadcasts/{source_path}")
 
     expected_summary = "The markdown-formatted broadcast message."
     expected_body_pre = (
@@ -138,9 +138,9 @@ def test_env_list(broadcasts_dir: Path) -> None:
     assert broadcast.stale is False
 
 
-def test_env_string(broadcasts_dir: Path) -> None:
+def test_env_string(data: Data) -> None:
     source_path = "env-string.md"
-    text = broadcasts_dir.joinpath(source_path).read_text()
+    text = data.read_text(f"broadcasts/{source_path}")
 
     expected_summary = "The markdown-formatted broadcast message."
     expected_body_pre = (
@@ -166,9 +166,9 @@ def test_env_string(broadcasts_dir: Path) -> None:
     assert broadcast.stale is False
 
 
-def test_summary(broadcasts_dir: Path) -> None:
+def test_summary(data: Data) -> None:
     source_path = "summary.md"
-    text = broadcasts_dir.joinpath(source_path).read_text()
+    text = data.read_text(f"broadcasts/{source_path}")
 
     expected_summary = (
         "There is no summary here,\njust a couple of title lines"
@@ -191,9 +191,9 @@ def test_summary(broadcasts_dir: Path) -> None:
     assert broadcast.identifier == source_path
 
 
-def test_defer_expire(broadcasts_dir: Path) -> None:
+def test_defer_expire(data: Data) -> None:
     source_path = "defer-expire.md"
-    text = broadcasts_dir.joinpath(source_path).read_text()
+    text = data.read_text(f"broadcasts/{source_path}")
 
     expected_summary = "The markdown-formatted broadcast message."
     expected_body_pre = (
@@ -227,9 +227,9 @@ def test_defer_expire(broadcasts_dir: Path) -> None:
     )
 
 
-def test_defer_expire_fuzzy(broadcasts_dir: Path) -> None:
+def test_defer_expire_fuzzy(data: Data) -> None:
     source_path = "defer-expire-fuzzy.md"
-    text = broadcasts_dir.joinpath(source_path).read_text()
+    text = data.read_text(f"broadcasts/{source_path}")
 
     expected_summary = "The markdown-formatted broadcast message.\n"
     expected_body_pre = "The markdown-formatted broadcast message.\n"
@@ -256,9 +256,9 @@ def test_defer_expire_fuzzy(broadcasts_dir: Path) -> None:
     )
 
 
-def test_defer_expire_fuzzy_default_tz(broadcasts_dir: Path) -> None:
+def test_defer_expire_fuzzy_default_tz(data: Data) -> None:
     source_path = "defer-expire-fuzzy-default-tz.md"
-    text = broadcasts_dir.joinpath(source_path).read_text()
+    text = data.read_text(f"broadcasts/{source_path}")
 
     md = BroadcastMarkdown(text, source_path)
     assert md.metadata.timezone == dateutil.tz.gettz("America/Los Angeles")
@@ -274,9 +274,9 @@ def test_defer_expire_fuzzy_default_tz(broadcasts_dir: Path) -> None:
     )
 
 
-def test_defer_ttl(broadcasts_dir: Path) -> None:
+def test_defer_ttl(data: Data) -> None:
     source_path = "defer-ttl.md"
-    text = broadcasts_dir.joinpath(source_path).read_text()
+    text = data.read_text(f"broadcasts/{source_path}")
 
     md = BroadcastMarkdown(text, source_path)
     broadcast = md.to_broadcast()
@@ -290,9 +290,9 @@ def test_defer_ttl(broadcasts_dir: Path) -> None:
     )
 
 
-def test_defer_noexpire(broadcasts_dir: Path) -> None:
+def test_defer_noexpire(data: Data) -> None:
     source_path = "defer-noexpire.md"
-    text = broadcasts_dir.joinpath(source_path).read_text()
+    text = data.read_text(f"broadcasts/{source_path}")
 
     md = BroadcastMarkdown(text, source_path)
     broadcast = md.to_broadcast()
@@ -303,9 +303,9 @@ def test_defer_noexpire(broadcasts_dir: Path) -> None:
     )
 
 
-def test_expire(broadcasts_dir: Path) -> None:
+def test_expire(data: Data) -> None:
     source_path = "expire.md"
-    text = broadcasts_dir.joinpath(source_path).read_text()
+    text = data.read_text(f"broadcasts/{source_path}")
 
     md = BroadcastMarkdown(text, source_path)
     broadcast = md.to_broadcast()
@@ -316,9 +316,9 @@ def test_expire(broadcasts_dir: Path) -> None:
     )
 
 
-def test_patch_thursday(broadcasts_dir: Path) -> None:
+def test_patch_thursday(data: Data) -> None:
     source_path = "patch-thursday.md"
-    text = broadcasts_dir.joinpath(source_path).read_text()
+    text = data.read_text(f"broadcasts/{source_path}")
     md = BroadcastMarkdown(text, source_path)
     broadcast = md.to_broadcast()
     scheduler = broadcast.scheduler
