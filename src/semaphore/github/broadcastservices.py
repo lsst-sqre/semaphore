@@ -1,30 +1,24 @@
 """Orchestration around GitHub repository sources for broadcast messages."""
 
-from __future__ import annotations
-
 import dataclasses
 from collections.abc import AsyncGenerator, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
+from typing import Any, Self
 
+import httpx
 from gidgethub import GitHubException, RateLimitExceeded
-from gidgethub.sansio import accept_format
+from gidgethub.httpx import GitHubAPI
+from gidgethub.sansio import Event, accept_format
+from structlog.stdlib import BoundLogger
 
 from ..broadcast.markdown import BroadcastMarkdown
+from ..broadcast.repository import BroadcastMessageRepository
 from ..config import config
 from .client import (
     create_github_client,
     create_github_installation_client,
     get_app_jwt,
 )
-
-if TYPE_CHECKING:
-    import httpx
-    from gidgethub.httpx import GitHubAPI
-    from gidgethub.sansio import Event
-    from sempaphore.broadcast.repository import BroadcastMessageRepository
-    from structlog.stdlib import BoundLogger
-
 
 BROADCASTS_DIR = "broadcasts"
 """Directory relative to a GitHub repository's root that contains broadcast

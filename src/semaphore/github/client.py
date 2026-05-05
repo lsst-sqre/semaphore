@@ -2,17 +2,11 @@
 configuration.
 """
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
 import gidgethub.apps
 from gidgethub.httpx import GitHubAPI
+from httpx import AsyncClient
 
 from ..config import config
-
-if TYPE_CHECKING:
-    import httpx.AsyncClient
 
 __all__ = [
     "GitHubClientConfigError",
@@ -61,7 +55,7 @@ def get_app_jwt() -> str:
 
 
 def create_github_client(
-    *, http_client: httpx.AsyncClient, oauth_token: str | None = None
+    *, http_client: AsyncClient, oauth_token: str | None = None
 ) -> GitHubAPI:
     """Create an HTTPx GitHub client.
 
@@ -84,7 +78,7 @@ def create_github_client(
 
 
 async def create_github_installation_client(
-    *, http_client: httpx.AsyncClient, installation_id: str
+    *, http_client: AsyncClient, installation_id: str
 ) -> GitHubAPI:
     """Create a GitHub API client authorized as a GitHub App installation,
     with specific permissions on the repository/organization the app is

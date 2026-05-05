@@ -2,12 +2,10 @@
 front matter.
 """
 
-from __future__ import annotations
-
 import datetime
 import enum
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 import arrow
 import dateutil
@@ -15,6 +13,7 @@ import dateutil.parser
 import dateutil.rrule
 import yaml
 from markdown_it import MarkdownIt
+from markdown_it.token import Token
 from mdformat.renderer import MDRenderer
 from mdit_py_plugins.front_matter import front_matter_plugin
 from pydantic import (
@@ -36,12 +35,8 @@ from .models import (
     OpenEndedScheduler,
     PermaScheduler,
     RecurringScheduler,
+    Scheduler,
 )
-
-if TYPE_CHECKING:
-    from markdown_it.token import Token
-
-    from .models import Scheduler
 
 __all__ = ["BroadcastMarkdown", "BroadcastMarkdownFrontMatter"]
 
@@ -53,183 +48,73 @@ See https://markdown-it-py.readthedocs.io/en/latest/using.html#the-parser
 """
 
 
-class BroadcastMarkdown:
-    """A representation of a markdown file containing broadcast message
-    content and metadata.
+def convert_to_tzinfo(v: Any) -> datetime.tzinfo:
+    """Convert a value to a datetime.tzinfo.
 
-    Properties
+    This function is intended to be used in a validator for Pydantic models
+    and will raise ValueError or TypeError if ``v`` is not an appropriate
+    value.
+
+    Parameters
     ----------
-    text
-        The content of the markdown message (including YAML-formatted
-        front-matter).
-    identifier
-        A unique identifier that is associated with the markdown content.
+    v
+        A value to convert into a timezone.
     """
+    if isinstance(v, datetime.tzinfo):
+        return v
+    elif isinstance(v, str):
+        tz = dateutil.tz.gettz(v)
+        if not isinstance(tz, datetime.tzinfo):
+            raise TypeError(f"Could not parse timezone from {v!s}")
+        return tz
+    else:
+        raise TypeError(f"Incorrect type for timezone, got {v!r}.")
 
-    def __init__(self, text: str, identifier: str) -> None:
-        self._text = text
-        self.identifier = identifier
-        self._md_env: dict[Any, Any] = {}
-        self._md_tokens = md.parse(text, self._md_env)
-        self._metadata = self._parse_metadata()
 
-    def _parse_metadata(self) -> BroadcastMarkdownFrontMatter:
-        frontmatter_token = self._get_front_matter_token()
-        yaml_data = yaml.safe_load(frontmatter_token.content)
-        return BroadcastMarkdownFrontMatter.model_validate(yaml_data)
+def convert_to_arrow(
+    v: Any, default_tz: Any | None = None
+) -> arrow.Arrow | None:
+    """Convert a value to an arrow.Arrow datetime.
 
-    def _get_front_matter_token(self) -> Token:
-        for token in self._md_tokens:
-            if token.type == "front_matter":
-                return token
-        raise ValueError(
-            "A front_matter token is not present in the markdown content."
-        )
+    This function is intended to be used in a validator for Pydantic models,
+    and will raise ValueErrors or TypeErrors if ``v`` is not an appropriate
+    value.
 
-    @property
-    def metadata(self) -> BroadcastMarkdownFrontMatter:
-        """The broadcast's metadata."""
-        return self._metadata
+    Parameters
+    ----------
+    v
+        A value to convert into a datetime.
+    default_tz
+        A default timezone. If neither ``v`` has a timezone or ``default_tz``
+        is set, the default timezone is UTC.
+    """
+    if v is None:
+        return None
+    if isinstance(v, datetime.date):
+        # Pydantic pre-parses YYYY-MM-DD into a datetime.date even if
+        # we didn't declare the field as a datetime.date type
+        dt = datetime.datetime.combine(v, datetime.time())
+    elif isinstance(v, datetime.datetime):
+        # Pydantic pre-parses timestamps into datetime.datetime even if
+        # we didn't declare the field as a datetime.datetime type
+        # Pydantic pre-parses into a datetime
+        dt = v
+    elif isinstance(v, str):
+        try:
+            dt = dateutil.parser.parse(v, fuzzy=True, yearfirst=True)
+        except (ValueError, OverflowError) as e:
+            raise ValueError("Could not parse date") from e
+    else:
+        raise TypeError(f"Not a string (got {v!r})")
 
-    @property
-    def text(self) -> str:
-        """The full text of the markdown message (including front-matter)."""
-        return self._text
-
-    @property
-    def body(self) -> str | None:
-        """The text of the markdown body or `None` if the message doesn't have
-        body content.
-        """
-        body_tokens = [t for t in self._md_tokens if t.type != "front_matter"]
-        if len(body_tokens) == 0:
-            return None
-        else:
-            return MDRenderer().render(body_tokens, md.options, self._md_env)
-
-    def is_relevant_to_env(self, env_name: str) -> bool:
-        """Determine if this broadcast message is relevant to the given
-        Phalanx environment name given the ``env`` key in the front matter.
-
-        A message is considered "relevant" if the message's ``env`` key isn't
-        set (`None`) or if the given environment is in the list of
-        environment names.
-
-        Parameters
-        ----------
-        env_name
-            Name of the Phalanx environment (e.g., `idf-prod`).
-
-        Returns
-        -------
-        bool
-            `True`, if the message should be included in that environment's
-            broadcast message. `False` otherwise.
-        """
-        return (self._metadata.env is None) or (env_name in self._metadata.env)
-
-    def extract_content(self, *, get_summary: bool) -> str | None:
-        if self.body is None:
-            raise RuntimeError("No body provided")
-
-        paragraphs = self.body.split("\n\n")
-        new_summary = paragraphs[0]
-
-        del paragraphs[0]
-        new_body = "\n\n".join(paragraphs)
-
-        if get_summary:
-            return new_summary
-        else:
-            return new_body
-
-    @property
-    def extracted_summary(self) -> str:
-        content = self.extract_content(get_summary=True)
-
-        if content is None:
-            raise RuntimeError("No summary found")
-
-        return content
-
-    @property
-    def extracted_body(self) -> str | None:
-        content = self.extract_content(get_summary=False)
-
-        if content == "":
-            return None
-        else:
-            return content
-
-    def to_broadcast(self) -> BroadcastMessage:
-        """Export a BroadcastMessage from the markdown content.
-
-        Returns
-        -------
-        `semaphore.broadcast.data.BroadcastMessage`
-            The broadcast message.
-        """
-        if self.body is not None and self.metadata.summary is None:
-            new_summary = self.extracted_summary
-
-            new_body = self.extracted_body
-        else:
-            if self.metadata.summary is None:
-                raise RuntimeError(
-                    "Summary metadata must be set if body is empty"
-                )
-
-            new_summary = self.metadata.summary
-
-            new_body = self.body
-
-        return BroadcastMessage(
-            identifier=self.identifier,
-            summary_md=new_summary,
-            body_md=new_body,
-            scheduler=self._make_scheduler(),
-            enabled=self.metadata.enabled,
-            category=self.metadata.category,
-        )
-
-    def _make_ruleset(
-        self, rules: list[RecurringRule]
-    ) -> dateutil.rrule.rruleset:
-        rset = dateutil.rrule.rruleset(cache=True)
-        for rule in rules:
-            if rule.date is not None:
-                if rule.exclude:
-                    rset.exdate(rule.to_datetime())
-                else:
-                    rset.rdate(rule.to_datetime())
-            elif isinstance(rule, RecurringRule):
-                if rule.exclude:
-                    rset.exrule(rule.to_rrule())
-                else:
-                    rset.rrule(rule.to_rrule())
-        return rset
-
-    def _make_scheduler(self) -> Scheduler:
-        if self.metadata.defer is not None:
-            if self.metadata.expire is not None:
-                return OneTimeScheduler(
-                    self.metadata.defer, self.metadata.expire
-                )
-            elif self.metadata.ttl is not None:
-                return OneTimeScheduler.from_ttl(
-                    self.metadata.defer, self.metadata.ttl
-                )
-            else:
-                return OpenEndedScheduler(self.metadata.defer)
-        elif self.metadata.expire is not None:
-            # In this case, there is an expiration, but the defer must be
-            # none, so it is a fixed-expiration scheduler
-            return FixedExpirationScheduler(self.metadata.expire)
-        elif self.metadata.rules is not None and self.metadata.ttl is not None:
-            rset = self._make_ruleset(self.metadata.rules)
-            return RecurringScheduler(rruleset=rset, ttl=self.metadata.ttl)
-        else:
-            return PermaScheduler()
+    if dt.tzinfo:
+        # Parsed date includes a timezone.
+        return arrow.get(dt)
+    # naive datetime, so default to given timezone
+    elif default_tz:
+        return arrow.get(dt, default_tz)
+    else:
+        return arrow.get(dt, dateutil.tz.UTC)
 
 
 class FreqEnum(enum.StrEnum):
@@ -653,70 +538,180 @@ class BroadcastMarkdownFrontMatter(BaseModel):
         return self
 
 
-def convert_to_tzinfo(v: Any) -> datetime.tzinfo:
-    """Convert a value to a datetime.tzinfo.
+class BroadcastMarkdown:
+    """A representation of a markdown file containing broadcast message
+    content and metadata.
 
-    This function is intended to be used in a validator for Pydantic models
-    and will raise ValueError or TypeError if ``v`` is not an appropriate
-    value.
-
-    Parameters
+    Properties
     ----------
-    v
-        A value to convert into a timezone.
+    text
+        The content of the markdown message (including YAML-formatted
+        front-matter).
+    identifier
+        A unique identifier that is associated with the markdown content.
     """
-    if isinstance(v, datetime.tzinfo):
-        return v
-    elif isinstance(v, str):
-        tz = dateutil.tz.gettz(v)
-        if not isinstance(tz, datetime.tzinfo):
-            raise TypeError(f"Could not parse timezone from {v!s}")
-        return tz
-    else:
-        raise TypeError(f"Incorrect type for timezone, got {v!r}.")
 
+    def __init__(self, text: str, identifier: str) -> None:
+        self._text = text
+        self.identifier = identifier
+        self._md_env: dict[Any, Any] = {}
+        self._md_tokens = md.parse(text, self._md_env)
+        self._metadata = self._parse_metadata()
 
-def convert_to_arrow(
-    v: Any, default_tz: Any | None = None
-) -> arrow.Arrow | None:
-    """Convert a value to an arrow.Arrow datetime.
+    def _parse_metadata(self) -> BroadcastMarkdownFrontMatter:
+        frontmatter_token = self._get_front_matter_token()
+        yaml_data = yaml.safe_load(frontmatter_token.content)
+        return BroadcastMarkdownFrontMatter.model_validate(yaml_data)
 
-    This function is intended to be used in a validator for Pydantic models,
-    and will raise ValueErrors or TypeErrors if ``v`` is not an appropriate
-    value.
+    def _get_front_matter_token(self) -> Token:
+        for token in self._md_tokens:
+            if token.type == "front_matter":
+                return token
+        raise ValueError(
+            "A front_matter token is not present in the markdown content."
+        )
 
-    Parameters
-    ----------
-    v
-        A value to convert into a datetime.
-    default_tz
-        A default timezone. If neither ``v`` has a timezone or ``default_tz``
-        is set, the default timezone is UTC.
-    """
-    if v is None:
-        return None
-    if isinstance(v, datetime.date):
-        # Pydantic pre-parses YYYY-MM-DD into a datetime.date even if
-        # we didn't declare the field as a datetime.date type
-        dt = datetime.datetime.combine(v, datetime.time())
-    elif isinstance(v, datetime.datetime):
-        # Pydantic pre-parses timestamps into datetime.datetime even if
-        # we didn't declare the field as a datetime.datetime type
-        # Pydantic pre-parses into a datetime
-        dt = v
-    elif isinstance(v, str):
-        try:
-            dt = dateutil.parser.parse(v, fuzzy=True, yearfirst=True)
-        except (ValueError, OverflowError) as e:
-            raise ValueError("Could not parse date") from e
-    else:
-        raise TypeError(f"Not a string (got {v!r})")
+    @property
+    def metadata(self) -> BroadcastMarkdownFrontMatter:
+        """The broadcast's metadata."""
+        return self._metadata
 
-    if dt.tzinfo:
-        # Parsed date includes a timezone.
-        return arrow.get(dt)
-    # naive datetime, so default to given timezone
-    elif default_tz:
-        return arrow.get(dt, default_tz)
-    else:
-        return arrow.get(dt, dateutil.tz.UTC)
+    @property
+    def text(self) -> str:
+        """The full text of the markdown message (including front-matter)."""
+        return self._text
+
+    @property
+    def body(self) -> str | None:
+        """The text of the markdown body or `None` if the message doesn't have
+        body content.
+        """
+        body_tokens = [t for t in self._md_tokens if t.type != "front_matter"]
+        if len(body_tokens) == 0:
+            return None
+        else:
+            return MDRenderer().render(body_tokens, md.options, self._md_env)
+
+    def is_relevant_to_env(self, env_name: str) -> bool:
+        """Determine if this broadcast message is relevant to the given
+        Phalanx environment name given the ``env`` key in the front matter.
+
+        A message is considered "relevant" if the message's ``env`` key isn't
+        set (`None`) or if the given environment is in the list of
+        environment names.
+
+        Parameters
+        ----------
+        env_name
+            Name of the Phalanx environment (e.g., `idf-prod`).
+
+        Returns
+        -------
+        bool
+            `True`, if the message should be included in that environment's
+            broadcast message. `False` otherwise.
+        """
+        return (self._metadata.env is None) or (env_name in self._metadata.env)
+
+    def extract_content(self, *, get_summary: bool) -> str | None:
+        if self.body is None:
+            raise RuntimeError("No body provided")
+
+        paragraphs = self.body.split("\n\n")
+        new_summary = paragraphs[0]
+
+        del paragraphs[0]
+        new_body = "\n\n".join(paragraphs)
+
+        if get_summary:
+            return new_summary
+        else:
+            return new_body
+
+    @property
+    def extracted_summary(self) -> str:
+        content = self.extract_content(get_summary=True)
+
+        if content is None:
+            raise RuntimeError("No summary found")
+
+        return content
+
+    @property
+    def extracted_body(self) -> str | None:
+        content = self.extract_content(get_summary=False)
+
+        if content == "":
+            return None
+        else:
+            return content
+
+    def to_broadcast(self) -> BroadcastMessage:
+        """Export a BroadcastMessage from the markdown content.
+
+        Returns
+        -------
+        `semaphore.broadcast.data.BroadcastMessage`
+            The broadcast message.
+        """
+        if self.body is not None and self.metadata.summary is None:
+            new_summary = self.extracted_summary
+
+            new_body = self.extracted_body
+        else:
+            if self.metadata.summary is None:
+                raise RuntimeError(
+                    "Summary metadata must be set if body is empty"
+                )
+
+            new_summary = self.metadata.summary
+
+            new_body = self.body
+
+        return BroadcastMessage(
+            identifier=self.identifier,
+            summary_md=new_summary,
+            body_md=new_body,
+            scheduler=self._make_scheduler(),
+            enabled=self.metadata.enabled,
+            category=self.metadata.category,
+        )
+
+    def _make_ruleset(
+        self, rules: list[RecurringRule]
+    ) -> dateutil.rrule.rruleset:
+        rset = dateutil.rrule.rruleset(cache=True)
+        for rule in rules:
+            if rule.date is not None:
+                if rule.exclude:
+                    rset.exdate(rule.to_datetime())
+                else:
+                    rset.rdate(rule.to_datetime())
+            elif isinstance(rule, RecurringRule):
+                if rule.exclude:
+                    rset.exrule(rule.to_rrule())
+                else:
+                    rset.rrule(rule.to_rrule())
+        return rset
+
+    def _make_scheduler(self) -> Scheduler:
+        if self.metadata.defer is not None:
+            if self.metadata.expire is not None:
+                return OneTimeScheduler(
+                    self.metadata.defer, self.metadata.expire
+                )
+            elif self.metadata.ttl is not None:
+                return OneTimeScheduler.from_ttl(
+                    self.metadata.defer, self.metadata.ttl
+                )
+            else:
+                return OpenEndedScheduler(self.metadata.defer)
+        elif self.metadata.expire is not None:
+            # In this case, there is an expiration, but the defer must be
+            # none, so it is a fixed-expiration scheduler
+            return FixedExpirationScheduler(self.metadata.expire)
+        elif self.metadata.rules is not None and self.metadata.ttl is not None:
+            rset = self._make_ruleset(self.metadata.rules)
+            return RecurringScheduler(rruleset=rset, ttl=self.metadata.ttl)
+        else:
+            return PermaScheduler()

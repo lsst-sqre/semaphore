@@ -1,18 +1,13 @@
 """Domain models for broadcast messages."""
 
-from __future__ import annotations
-
 import datetime
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, cast, override
+from typing import cast, override
 
 import arrow
-
-if TYPE_CHECKING:
-    import dateutil.rrule
-
+import dateutil.rrule
 
 __all__ = [
     "BroadcastCategory",

@@ -1,7 +1,5 @@
 """Semaphore FastAPI application."""
 
-from __future__ import annotations
-
 import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager

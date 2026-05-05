@@ -1,7 +1,5 @@
 """Handlers for the app's external root, ``/semaphore/``."""
 
-from __future__ import annotations
-
 import asyncio
 from typing import Annotated
 

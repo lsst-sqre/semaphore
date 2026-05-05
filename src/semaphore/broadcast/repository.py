@@ -1,12 +1,8 @@
 """Broadcast message repository."""
 
-from __future__ import annotations
-
 from collections.abc import Iterator, Sequence
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from .models import BroadcastMessage
+from .models import BroadcastMessage
 
 
 class NotFoundError(Exception):

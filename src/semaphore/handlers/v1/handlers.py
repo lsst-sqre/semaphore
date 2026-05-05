@@ -1,7 +1,5 @@
 """Handlers for the app's v1 REST API."""
 
-from __future__ import annotations
-
 from typing import Annotated
 
 from fastapi import APIRouter, Depends

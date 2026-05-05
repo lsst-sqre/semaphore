@@ -1,18 +1,14 @@
 """GitHub webhook event handlers."""
 
-from __future__ import annotations
+from typing import Any
 
-from typing import TYPE_CHECKING, Any
-
+from gidgethub.httpx import GitHubAPI
 from gidgethub.routing import Router
+from gidgethub.sansio import Event
+from structlog.stdlib import BoundLogger
 
+from ..broadcast.repository import BroadcastMessageRepository
 from .broadcastservices import update_broadcast_repo_from_push_event
-
-if TYPE_CHECKING:
-    from gidgethub.httpx import GitHubAPI
-    from gidgethub.sansio import Event
-    from sempaphore.broadcast.repository import BroadcastMessageRepository
-    from structlog.stdlib import BoundLogger
 
 __all__ = ["router"]
 

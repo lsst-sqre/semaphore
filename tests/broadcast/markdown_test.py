@@ -1,10 +1,8 @@
 """Tests for the semaphore.broadcast.markdown module."""
 
-from __future__ import annotations
-
 import datetime
 from datetime import UTC
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import arrow
 import dateutil
@@ -22,9 +20,6 @@ from semaphore.broadcast.models import (
     PermaScheduler,
     RecurringScheduler,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def test_evergreen(broadcasts_dir: Path) -> None:

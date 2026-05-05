@@ -1,17 +1,13 @@
 """Tests for the semaphore v1 API."""
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
+from httpx import AsyncClient
 
 from semaphore.dependencies.broadcastrepo import broadcast_repo_dependency
 
 from ..support.broadcasts import create_active_message, create_disabled_message
-
-if TYPE_CHECKING:
-    from httpx import AsyncClient
 
 
 async def get_broadcasts(client: AsyncClient) -> dict[str, Any]:
