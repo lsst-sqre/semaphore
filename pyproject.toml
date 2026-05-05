@@ -19,10 +19,8 @@ classifiers = [
 ]
 requires-python = ">=3.14"
 dependencies = [
-    "aiofiles",
     "arrow",
-    "fastapi",
-    "fastapi-sqlalchemy",
+    "fastapi>=0.100",
     "gidgethub",
     "httpx",
     "markdown-it-py[linkify,plugins]",
@@ -34,7 +32,6 @@ dependencies = [
     "python-multipart",
     "pyyaml",
     "safir>=2.0",
-    "starlette",
     "structlog",
     "uvicorn[standard]",
 ]
