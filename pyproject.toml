@@ -61,13 +61,13 @@ docs = [
     "scriv[toml]>=1.5",
 ]
 lint = [
-    "pre-commit",
-    "pre-commit-uv",
+    "prek",
     "ruff>=0.9",
+    "uv",
 ]
 tox = [
     "tox>=4.24",
-    "tox-uv>=1.25",
+    "tox-uv-bare>=1.25",
 ]
 typing = [
     "mypy>=1.19",
