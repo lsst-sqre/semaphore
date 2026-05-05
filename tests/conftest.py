@@ -8,6 +8,7 @@ import pytest_asyncio
 from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from safir.testing.data import Data
 
 from semaphore import main
 
@@ -33,6 +34,5 @@ async def client(app: FastAPI) -> AsyncGenerator[AsyncClient]:
 
 
 @pytest.fixture
-def broadcasts_dir() -> Path:
-    """Directory containing test broadcast markdown messages."""
-    return Path(__file__).parent.joinpath("data/broadcasts")
+def data() -> Data:
+    return Data(Path(__file__).parent / "data")
