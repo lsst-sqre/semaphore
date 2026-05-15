@@ -410,6 +410,7 @@ class RecurringRule(BaseModel):
             byhour=self.by_hour,
             byminute=self.by_minute,
             bysecond=self.by_second,
+            cache=False,
         )
 
     def to_datetime(self) -> datetime.datetime:
@@ -680,7 +681,7 @@ class BroadcastMarkdown:
     def _make_ruleset(
         self, rules: list[RecurringRule]
     ) -> dateutil.rrule.rruleset:
-        rset = dateutil.rrule.rruleset(cache=True)
+        rset = dateutil.rrule.rruleset(cache=False)
         for rule in rules:
             if rule.date is not None:
                 if rule.exclude:
