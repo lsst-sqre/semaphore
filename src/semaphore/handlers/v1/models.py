@@ -7,6 +7,9 @@ from pydantic import BaseModel, Field
 
 from ...broadcast.models import BroadcastCategory, BroadcastMessage
 
+_MD_PARSER = MarkdownIt("gfm-like")
+"""Global Markdown parser used for all rendering."""
+
 
 class FormattedText(BaseModel):
     """Text that is formatted in both markdown and HTML."""
@@ -31,11 +34,10 @@ class FormattedText(BaseModel):
         FormattedText
             The formatted text, containing both markdown and HTML renderings.
         """
-        md_parser = MarkdownIt("gfm-like")
         if inline:
-            html_text = md_parser.renderInline(gfm_text)
+            html_text = _MD_PARSER.renderInline(gfm_text)
         else:
-            html_text = md_parser.render(gfm_text)
+            html_text = _MD_PARSER.render(gfm_text)
         return cls(gfm=gfm_text, html=html_text)
 
 
