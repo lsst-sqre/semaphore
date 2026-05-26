@@ -28,11 +28,11 @@ dependencies = [
     "mdformat",
     "mdformat-gfm",
     "pydantic>2",
-    "pydantic_settings",
+    "pydantic-settings",
     "python-dateutil",
     "python-multipart",
     "pyyaml",
-    "safir>=2.0",
+    "safir>=15",
     "structlog",
     "uvicorn[standard]",
 ]
@@ -54,6 +54,7 @@ dev = [
     "pytest-asyncio",
     "pytest-cov",
     "pytest-httpx",
+    "pytest-sugar",
     "pytest-xdist[psutil]",
 ]
 docs = [
