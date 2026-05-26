@@ -7,6 +7,13 @@ Find changes for the upcoming release in the project's [changelog.d directory](h
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-1.0.1'></a>
+## 1.0.1 (2026-05-26)
+
+### Bug fixes
+
+- Fix erratic memory leak in date calculations or Markdown generation for broadcast messages.
+
 <a id='changelog-1.0.0'></a>
 ## 1.0.0 (2026-05-06)
 
