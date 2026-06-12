@@ -1,0 +1,9 @@
+"""The base for the table schemas."""
+
+from sqlalchemy.orm import DeclarativeBase
+
+__all__ = ["SchemaBase"]
+
+
+class SchemaBase(DeclarativeBase):
+    """Declarative base for the Semaphore database schema."""
