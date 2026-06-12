@@ -9,6 +9,8 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+from safir.database import create_database_engine, is_database_current
+from safir.dependencies.db_session import db_session_dependency
 from safir.dependencies.http_client import http_client_dependency
 from safir.logging import configure_logging, configure_uvicorn_logging
 from safir.middleware.x_forwarded import XForwardedMiddleware
@@ -38,6 +40,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger = structlog.get_logger("semaphore")
     logger.info("Running startup")
 
+    # Check that the database schema is current.
+    engine = create_database_engine(
+        config.database_url, config.database_password
+    )
+    if not await is_database_current(engine, logger):
+        raise RuntimeError("Database schema out of date")
+    await engine.dispose()
+
+    # Initialize the database.
+    await db_session_dependency.initialize(
+        config.database_url, config.database_password
+    )
+
+    # Initialize the broadcast GitHub repository.
     broadcast_repo = await broadcast_repo_dependency()
     if config.enable_github_app:
         await bootstrap_broadcast_repo(

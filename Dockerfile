@@ -59,6 +59,10 @@ RUN useradd --create-home appuser
 # Copy the virtualenv
 COPY --from=install-image /app/.venv /app/.venv
 
+# Copy the Alembic configuration and migrations.
+COPY --from=install-image /app/alembic.ini /app/alembic.ini
+COPY --from=install-image /app/alembic /app/alembic
+
 # Set the working directory.
 WORKDIR /app
 

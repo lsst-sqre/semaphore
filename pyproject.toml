@@ -20,7 +20,10 @@ classifiers = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "alembic[tz]>=1.16",
     "arrow",
+    "asyncpg",
+    "click>8.1.4",
     "fastapi>=0.100",
     "gidgethub",
     "httpx",
@@ -28,15 +31,19 @@ dependencies = [
     "mdformat",
     "mdformat-gfm",
     "pydantic>2",
-    "pydantic-settings",
+    "pydantic-settings>=2.6",
     "python-dateutil",
     "python-multipart",
     "pyyaml",
-    "safir>=15",
+    "safir[db]>=15.1.1",
+    "sqlalchemy[asyncio]>=2",
     "structlog",
     "uvicorn[standard]",
 ]
 dynamic = ["version"]
+
+[project.scripts]
+semaphore = "semaphore.cli:main"
 
 [project.urls]
 Homepage = "https://semaphore.lsst.io"
@@ -56,6 +63,7 @@ dev = [
     "pytest-httpx",
     "pytest-sugar",
     "pytest-xdist[psutil]",
+    "testcontainers[postgres]",
 ]
 docs = [
     "documenteer[guide]",
@@ -69,9 +77,11 @@ lint = [
 nox = [
     "nox",
     "nox-uv",
+    "testcontainers[postgres]",
 ]
 typing = [
     "mypy>=1.19",
+    "sqlalchemy[mypy]>=2",
     "types-python-dateutil",
     "types-pyyaml",
 ]
@@ -116,7 +126,7 @@ enable_error_code = [
 ]
 ignore_missing_imports = true
 local_partial_types = true
-plugins = ["pydantic.mypy"]
+plugins = ["pydantic.mypy", "sqlalchemy.ext.mypy.plugin"]
 no_implicit_reexport = true
 show_error_codes = true
 strict_equality = true
@@ -132,9 +142,13 @@ warn_untyped_fields = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
+filterwarnings = [
+    # testcontainers hasn't updated all of the community modules
+    "ignore:.*wait_container_is_ready decorator.*:DeprecationWarning",
+]
 # The python_files setting is not for test detection (pytest will pick up any
 # test files named *_test.py without this setting) but to enable special
-# assert processing in any non-test supporting files under tests.  We
+# assert processing in any non-test supporting files under tests. We
 # conventionally put test support functions under tests.support and may
 # sometimes use assert in test fixtures in conftest.py, and pytest only
 # enables magical assert processing (showing a full diff on assert failures

@@ -5,6 +5,7 @@ from typing import Self
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from safir.logging import LogLevel, Profile
+from safir.pydantic import EnvAsyncPostgresDsn
 
 __all__ = ["Config", "config"]
 
@@ -14,6 +15,16 @@ class Config(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="SEMAPHORE_", case_sensitive=False
+    )
+
+    database_url: EnvAsyncPostgresDsn = Field(
+        ...,
+        title="PostgreSQL DSN",
+        description="DSN of PostgreSQL database",
+    )
+
+    database_password: SecretStr | None = Field(
+        None, title="Password of PostgreSQL database"
     )
 
     enable_github_app: bool = Field(
