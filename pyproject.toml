@@ -66,9 +66,9 @@ lint = [
     "ruff>=0.9",
     "uv",
 ]
-tox = [
-    "tox>=4.24",
-    "tox-uv-bare>=1.25",
+nox = [
+    "nox",
+    "nox-uv",
 ]
 typing = [
     "mypy>=1.19",
