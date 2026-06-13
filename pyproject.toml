@@ -36,6 +36,7 @@ dependencies = [
     "python-multipart",
     "pyyaml",
     "safir[db]>=15.1.1",
+    "starlette>=1.0.1",
     "sqlalchemy[asyncio]>=2",
     "structlog",
     "uvicorn[standard]",

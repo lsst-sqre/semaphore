@@ -1,0 +1,13 @@
+{
+  "body": {
+    "gfm": "# Some heading\n\n- Point one\n-Point two\n",
+    "html": "<h1>Some heading</h1>\n<ul>\n<li>Point one\n-Point two</li>\n</ul>\n"
+  },
+  "created": "<ANY>",
+  "id": "1",
+  "read": null,
+  "summary": {
+    "gfm": "This is a *notification*",
+    "html": "This is a <em>notification</em>"
+  }
+}
