@@ -9,9 +9,12 @@ including from dependencies.
 from dataclasses import dataclass
 from typing import Annotated, Any
 
-from fastapi import Depends, Header, Request
+from fastapi import Depends, Request
 from safir.dependencies.db_session import db_session_dependency
-from safir.dependencies.gafaelfawr import auth_logger_dependency
+from safir.dependencies.gafaelfawr import (
+    auth_dependency,
+    auth_logger_dependency,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog.stdlib import BoundLogger
 
@@ -77,14 +80,14 @@ class ContextDependency:
         self,
         *,
         request: Request,
-        x_auth_request_user: Annotated[str, Header()],
+        username: Annotated[str, Depends(auth_dependency)],
         session: Annotated[AsyncSession, Depends(db_session_dependency)],
         logger: Annotated[BoundLogger, Depends(auth_logger_dependency)],
     ) -> RequestContext:
         """Create a per-request context and return it."""
         return RequestContext(
             request=request,
-            username=x_auth_request_user,
+            username=username,
             logger=logger,
             session=session,
             factory=Factory(self._process_context, session, logger),
