@@ -78,9 +78,9 @@ app = FastAPI(
         "(https://github.com/lsst-sqre/semaphore)"
     ),
     version=version("semaphore"),
-    docs_url=f"/{config.path_prefix}/docs",
-    redoc_url=f"/{config.path_prefix}/redoc",
-    openapi_url=f"/{config.path_prefix}/openapi.json",
+    docs_url=f"{config.path_prefix}/docs",
+    redoc_url=f"{config.path_prefix}/redoc",
+    openapi_url=f"{config.path_prefix}/openapi.json",
     lifespan=lifespan,
 )
 app.include_router(internal_router)
