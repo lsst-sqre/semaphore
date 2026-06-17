@@ -15,6 +15,7 @@ from safir.database import (
     stamp_database_async,
 )
 from safir.testing.data import Data
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from semaphore import main
 from semaphore.config import config
@@ -74,15 +75,20 @@ def data(request: pytest.FixtureRequest) -> Data:
 
 
 @pytest_asyncio.fixture
-async def empty_database() -> None:
+async def empty_database(engine: AsyncEngine) -> None:
     """Empty the database before a test."""
     logger = structlog.get_logger("semaphore")
-    engine = create_database_engine(
-        config.database_url, config.database_password
-    )
     base = SchemaBase.metadata
     await initialize_database(engine, logger, schema=base, reset=True)
     await stamp_database_async(engine)
+
+
+@pytest_asyncio.fixture
+async def engine() -> AsyncGenerator[AsyncEngine]:
+    engine = create_database_engine(
+        config.database_url, config.database_password
+    )
+    yield engine
     await engine.dispose()
 
 

@@ -1,0 +1,14 @@
+[
+  {
+    "recipient": "some-user",
+    "summary": "Notification one"
+  },
+  {
+    "recipient": "some-user",
+    "summary": "Notification two"
+  },
+  {
+    "recipient": "other-user",
+    "summary": "Notification three"
+  }
+]
