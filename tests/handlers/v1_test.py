@@ -6,9 +6,14 @@ from unittest.mock import ANY
 
 import pytest
 from httpx import AsyncClient, Response
+from safir.database import create_async_session, datetime_to_db
+from safir.http import PaginationLinkData
 from safir.testing.data import Data
+from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from semaphore.dependencies.broadcastrepo import broadcast_repo_dependency
+from semaphore.schema import UserNotification as SQLUserNotification
 
 from ..support.broadcasts import create_active_message, create_disabled_message
 from ..support.constants import TEST_BASE_URL
@@ -55,7 +60,7 @@ async def test_get_broadcasts(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_user_notification(
+async def test_notification(
     data: Data, admin_client: AsyncClient, user_client: AsyncClient
 ) -> None:
     start = datetime.now(tz=UTC).replace(microsecond=0)
@@ -119,7 +124,7 @@ async def test_user_notification(
 
 
 @pytest.mark.asyncio
-async def test_user_notification_read(
+async def test_notification_read(
     data: Data, admin_client: AsyncClient, user_client: AsyncClient
 ) -> None:
     to_send = data.read_json("notifications/multiple")
@@ -162,3 +167,145 @@ async def test_user_notification_read(
     for index in (0, 1):
         read = datetime.fromisoformat(updated_notifications[index]["read"])
         assert start <= read <= start + timedelta(seconds=2)
+
+
+async def setup_paginate_test(
+    data: Data, admin_client: AsyncClient, engine: AsyncEngine
+) -> None:
+    """Create some notifications to test pagination.
+
+    Parameters
+    ----------
+    data
+        Test data management object.
+    admin_client
+        Client that authenticates as an admin.
+    engine
+        Database engine.
+    """
+    to_send = data.read_json("notifications/pagination")
+    for notification in to_send:
+        r = await admin_client.post(
+            "/semaphore/v1/admin/notifications",
+            json=notification,
+        )
+        assert_http_response(r, 200)
+
+    # Adjust the creation timestamps to match the expected data.
+    expected = data.read_json("api/sent-pagination")
+    session = await create_async_session(engine)
+    async with session.begin():
+        for notification in expected:
+            id = int(notification["id"])
+            created = datetime.fromisoformat(notification["created"])
+            await session.execute(
+                update(SQLUserNotification)
+                .where(SQLUserNotification.id == id)
+                .values(created=datetime_to_db(created))
+            )
+
+
+@pytest.mark.asyncio
+async def test_notification_admin_paginate(
+    data: Data,
+    admin_client: AsyncClient,
+    engine: AsyncEngine,
+) -> None:
+    await setup_paginate_test(data, admin_client, engine)
+
+    # Retrieve all of the notifications.
+    r = await admin_client.get("/semaphore/v1/admin/notifications")
+    assert_http_response(r, 200)
+    notifications = r.json()
+    data.assert_json_matches(notifications, "api/sent-pagination")
+
+    # Retrieve the notifications one at a time to test pagination. Limit to
+    # the sender, which should produce the same results (all the notifications
+    # were sent by the same user), but helps check that the per-notification
+    # URLs don't include the search string.
+    r = await admin_client.get(
+        "/semaphore/v1/admin/notifications",
+        params={"limit": "1", "sender": notifications[0]["sender"]},
+    )
+    assert_http_response(r, 200)
+    assert r.json() == [notifications[0]]
+    assert r.headers["X-Total-Count"] == str(len(notifications))
+    links = PaginationLinkData.from_header(r.headers["Link"])
+    assert links.next_url
+    r = await admin_client.get(links.next_url)
+    assert_http_response(r, 200)
+    assert r.json() == [notifications[1]]
+    assert r.headers["X-Total-Count"] == str(len(notifications))
+    links = PaginationLinkData.from_header(r.headers["Link"])
+    assert links.next_url
+    assert links.prev_url
+    r = await admin_client.get(links.prev_url)
+    assert_http_response(r, 200)
+    assert r.json() == [notifications[0]]
+    r = await admin_client.get(links.next_url)
+    assert_http_response(r, 200)
+    assert r.json() == notifications[2:]
+
+    # Restrict to a specific user and request pagination.
+    r = await admin_client.get(
+        "/semaphore/v1/admin/notifications",
+        params={"limit": "1", "recipient": notifications[0]["recipient"]},
+    )
+    assert_http_response(r, 200)
+    assert r.json() == [notifications[0]]
+    links = PaginationLinkData.from_header(r.headers["Link"])
+    assert not links.next_url
+    assert r.headers["X-Total-Count"] == "1"
+
+    # Request the first two notifications by created date.
+    r = await admin_client.get(
+        "/semaphore/v1/admin/notifications",
+        params={"since": notifications[1]["created"]},
+    )
+    assert_http_response(r, 200)
+    assert r.json() == notifications[:2]
+
+    # Request the last two notifications by created date.
+    r = await admin_client.get(
+        "/semaphore/v1/admin/notifications",
+        params={"until": notifications[1]["created"]},
+    )
+    assert_http_response(r, 200)
+    assert r.json() == notifications[1:]
+
+
+@pytest.mark.asyncio
+async def test_notification_user_paginate(
+    *,
+    data: Data,
+    admin_client: AsyncClient,
+    user_client: AsyncClient,
+    engine: AsyncEngine,
+) -> None:
+    await setup_paginate_test(data, admin_client, engine)
+
+    # Retrieve all of the notifications.
+    r = await user_client.get("/semaphore/v1/notifications")
+    assert_http_response(r, 200)
+    notifications = r.json()
+    data.assert_json_matches(notifications, "api/notifications-pagination")
+
+    # Retrieve the notifications one at a time to test pagination.
+    r = await user_client.get(
+        "/semaphore/v1/notifications", params={"limit": "1"}
+    )
+    assert_http_response(r, 200)
+    assert r.json() == [notifications[0]]
+    assert r.headers["X-Total-Count"] == str(len(notifications))
+    links = PaginationLinkData.from_header(r.headers["Link"])
+    assert links.next_url
+    r = await user_client.get(links.next_url)
+    assert_http_response(r, 200)
+    assert r.json() == [notifications[1]]
+    assert r.headers["X-Total-Count"] == str(len(notifications))
+    links = PaginationLinkData.from_header(r.headers["Link"])
+    assert not links.next_url
+    assert links.prev_url
+    r = await user_client.get(links.prev_url)
+    assert_http_response(r, 200)
+    assert r.json() == [notifications[0]]

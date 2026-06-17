@@ -1,0 +1,22 @@
+[
+  {
+    "created": "2026-06-17T17:00:00Z",
+    "id": "2",
+    "read": null,
+    "summary": {
+      "gfm": "Notification two",
+      "html": "Notification two"
+    },
+    "url": "https://example.com/semaphore/v1/notifications/2"
+  },
+  {
+    "created": "2026-06-17T15:00:00Z",
+    "id": "1",
+    "read": null,
+    "summary": {
+      "gfm": "Notification one",
+      "html": "Notification one"
+    },
+    "url": "https://example.com/semaphore/v1/notifications/1"
+  }
+]
