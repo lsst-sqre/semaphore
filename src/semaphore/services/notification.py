@@ -289,3 +289,21 @@ class UserNotificationService:
             prev_cursor=results.prev_cursor,
             count=results.count,
         )
+
+    async def mark_read(self, ids: set[str], required_recipient: str) -> None:
+        """Mark a set of notifications as read.
+
+        Notifications that are already marked as read will be silently left
+        unchanged, as will notifications that don't exist. Error reporting is
+        not useful here since there may be a race condition with revoking
+        notifications.
+
+        Parameters
+        ----------
+        ids
+            Notification IDs to mark as read.
+        required_recipient
+            Only operate on notifications sent to this username.
+        """
+        async with self._session.begin():
+            await self._storage.mark_read(required_recipient, ids)

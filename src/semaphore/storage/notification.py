@@ -134,9 +134,30 @@ class UserNotificationStore:
         if sender:
             stmt = stmt.where(SQLUserNotification.sender == sender)
         if unread:
-            stmt = stmt.where(SQLUserNotification.read.isnot(None))
+            stmt = stmt.where(SQLUserNotification.read.is_(None))
 
         # Perform the paginated query.
         return await self._paginated_runner.query_object(
             self._session, stmt, cursor=cursor, limit=limit
         )
+
+    async def mark_read(self, recipient: str, ids: set[str]) -> None:
+        """Mark a set of notification IDs as read.
+
+        Parameters
+        ----------
+        recipient
+            Only act on notifications sent to this recipient.
+        ids
+            Set of IDs to mark as read.
+        """
+        ids_int = [int(v) for v in ids]
+        now = datetime_to_db(datetime.now(tz=UTC).replace(microsecond=0))
+        stmt = select(SQLUserNotification).where(
+            SQLUserNotification.recipient == recipient,
+            SQLUserNotification.id.in_(ids_int),
+            SQLUserNotification.read.is_(None),
+        )
+        notifications = await self._session.scalars(stmt)
+        for notification in notifications:
+            notification.read = now

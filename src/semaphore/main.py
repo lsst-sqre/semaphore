@@ -65,6 +65,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     yield
 
+    await db_session_dependency.aclose()
     await http_client_dependency.aclose()
 
 
