@@ -19,7 +19,7 @@ class UserNotification(SchemaBase):
     recipient: Mapped[str]
     sender: Mapped[str]
     summary: Mapped[str]
-    body: Mapped[str]
+    body: Mapped[str | None]
     created: Mapped[datetime]
     read: Mapped[datetime | None]
 
