@@ -12,6 +12,7 @@ from fastapi.openapi.utils import get_openapi
 from safir.database import create_database_engine, is_database_current
 from safir.dependencies.db_session import db_session_dependency
 from safir.dependencies.http_client import http_client_dependency
+from safir.fastapi import ClientRequestError, client_request_error_handler
 from safir.logging import configure_logging, configure_uvicorn_logging
 from safir.middleware.x_forwarded import XForwardedMiddleware
 from safir.sentry import initialize_sentry
@@ -83,9 +84,14 @@ app = FastAPI(
     openapi_url=f"{config.path_prefix}/openapi.json",
     lifespan=lifespan,
 )
+"""The main FastAPI web application for Semaphore."""
+
+# Attach the routers.
 app.include_router(internal_router)
 app.include_router(external_router, prefix=config.path_prefix)
 app.include_router(v1_router, prefix=f"{config.path_prefix}/v1")
+
+# Add middleware.
 app.add_middleware(XForwardedMiddleware)
 
 # This CORS policy is quite liberal. When the API becomes writeable we'll
@@ -97,6 +103,9 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+# Add exception handlers.
+app.exception_handler(ClientRequestError)(client_request_error_handler)
 
 # Configure Slack alerts.
 if webhook := config.slack_webhook:

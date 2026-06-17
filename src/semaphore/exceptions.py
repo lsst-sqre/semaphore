@@ -11,3 +11,6 @@ class NotificationNotFoundError(ClientRequestError):
 
     error = "notification_not_found"
     status_code = status.HTTP_404_NOT_FOUND
+
+    def __init__(self, id: str) -> None:
+        super().__init__(f"Unknown notification: {id}")
