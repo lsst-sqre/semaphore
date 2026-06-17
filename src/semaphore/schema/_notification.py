@@ -27,4 +27,5 @@ class UserNotification(SchemaBase):
         Index("by_created", "created", "id"),
         Index("by_sender", "sender", "created", "id"),
         Index("by_recipient", "recipient", "created", "id"),
+        Index("by_recipient_id", "recipient", "id"),
     )
