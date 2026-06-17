@@ -95,3 +95,10 @@ async def test_user_notification(
     notification = r.json()
     data.assert_json_matches(notification, "api/notification-one")
     assert datetime.fromisoformat(notification["created"]) == created
+
+    # The admin user should not see the notification for the regular user.
+    r = await admin_client.get("/semaphore/v1/notifications")
+    assert r.status_code == 200
+    assert r.json() == []
+    r = await admin_client.get(notification_url)
+    assert r.status_code == 404
