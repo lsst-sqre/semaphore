@@ -1,0 +1,5 @@
+{
+  "recipient": "some-user",
+  "summary": "This is a *notification*",
+  "body": "# Some heading\n\n- Point one\n-Point two\n"
+}

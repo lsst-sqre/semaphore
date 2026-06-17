@@ -23,4 +23,8 @@ class UserNotification(SchemaBase):
     created: Mapped[datetime]
     read: Mapped[datetime | None]
 
-    __table_args__ = (Index("by_recipient", "recipient", "created"),)
+    __table_args__ = (
+        Index("by_created", "created", "id"),
+        Index("by_sender", "sender", "created", "id"),
+        Index("by_recipient", "recipient", "created", "id"),
+    )

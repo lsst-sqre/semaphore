@@ -7,6 +7,11 @@ from pydantic import BaseModel, Field
 
 from ...broadcast.models import BroadcastCategory, BroadcastMessage
 
+__all__ = [
+    "BroadcastMessageModel",
+    "FormattedText",
+]
+
 _MD_PARSER = MarkdownIt("gfm-like")
 """Global Markdown parser used for all rendering."""
 

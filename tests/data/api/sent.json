@@ -1,0 +1,10 @@
+{
+  "body": "# Some heading\n\n- Point one\n-Point two\n",
+  "created": "<ANY>",
+  "id": "1",
+  "read": null,
+  "recipient": "some-user",
+  "sender": "admin",
+  "summary": "This is a *notification*",
+  "url": "https://example.com/semaphore/v1/admin/notifications/1"
+}

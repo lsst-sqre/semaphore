@@ -20,6 +20,32 @@ from semaphore import main
 from semaphore.config import config
 from semaphore.schema import SchemaBase
 
+from .support.constants import TEST_BASE_URL
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--update-test-data",
+        action="store_true",
+        default=False,
+        help="Overwrite expected test output with current results",
+    )
+
+
+@pytest_asyncio.fixture
+async def admin_client(app: FastAPI) -> AsyncGenerator[AsyncClient]:
+    """Client authenticated as an admin user.
+
+    Currently, this just sets a username. Eventually it will integrate with
+    the Gafaelfawr mock.
+    """
+    async with AsyncClient(
+        base_url=TEST_BASE_URL,
+        headers={"X-Auth-Request-User": "admin"},
+        transport=ASGITransport(app=app),
+    ) as client:
+        yield client
+
 
 @pytest_asyncio.fixture
 async def app(empty_database: None) -> AsyncGenerator[FastAPI]:
@@ -36,14 +62,15 @@ async def app(empty_database: None) -> AsyncGenerator[FastAPI]:
 async def client(app: FastAPI) -> AsyncGenerator[AsyncClient]:
     """Return an ``httpx.AsyncClient`` configured to talk to the test app."""
     async with AsyncClient(
-        transport=ASGITransport(app), base_url="https://example.com/"
+        transport=ASGITransport(app), base_url=TEST_BASE_URL
     ) as client:
         yield client
 
 
 @pytest.fixture
-def data() -> Data:
-    return Data(Path(__file__).parent / "data")
+def data(request: pytest.FixtureRequest) -> Data:
+    update = request.config.getoption("--update-test-data")
+    return Data(Path(__file__).parent / "data", update_test_data=update)
 
 
 @pytest_asyncio.fixture
@@ -57,3 +84,18 @@ async def empty_database() -> None:
     await initialize_database(engine, logger, schema=base, reset=True)
     await stamp_database_async(engine)
     await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def user_client(app: FastAPI) -> AsyncGenerator[AsyncClient]:
+    """Client authenticated as a regular user.
+
+    Currently, this just sets a username. Eventually it will integrate with
+    the Gafaelfawr mock.
+    """
+    async with AsyncClient(
+        base_url=TEST_BASE_URL,
+        headers={"X-Auth-Request-User": "some-user"},
+        transport=ASGITransport(app=app),
+    ) as client:
+        yield client
