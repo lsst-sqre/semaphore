@@ -1,6 +1,6 @@
 """Models for the v1 REST API."""
 
-from typing import Self
+from typing import Annotated, Self
 
 from markdown_it import MarkdownIt
 from pydantic import BaseModel, Field
@@ -10,6 +10,7 @@ from ...broadcast.models import BroadcastCategory, BroadcastMessage
 __all__ = [
     "BroadcastMessageModel",
     "FormattedText",
+    "UserNotificationRead",
 ]
 
 _MD_PARSER = MarkdownIt("gfm-like")
@@ -107,3 +108,19 @@ class BroadcastMessageModel(BaseModel):
             stale=message.stale,
             category=message.category,
         )
+
+
+class UserNotificationRead(BaseModel):
+    """Notification IDs to mark as read."""
+
+    ids: Annotated[
+        set[str],
+        Field(
+            title="Notification IDs",
+            description=(
+                "These notifications will be marked as read at the current"
+                " time if they are not already marked as read."
+            ),
+            examples=[{"56", "57", "58", "59"}],
+        ),
+    ]

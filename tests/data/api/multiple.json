@@ -1,0 +1,32 @@
+[
+  {
+    "created": "<ANY>",
+    "id": "3",
+    "read": null,
+    "summary": {
+      "gfm": "Notification three",
+      "html": "Notification three"
+    },
+    "url": "https://example.com/semaphore/v1/notifications/3"
+  },
+  {
+    "created": "<ANY>",
+    "id": "2",
+    "read": null,
+    "summary": {
+      "gfm": "Notification two",
+      "html": "Notification two"
+    },
+    "url": "https://example.com/semaphore/v1/notifications/2"
+  },
+  {
+    "created": "<ANY>",
+    "id": "1",
+    "read": null,
+    "summary": {
+      "gfm": "Notification one",
+      "html": "Notification one"
+    },
+    "url": "https://example.com/semaphore/v1/notifications/1"
+  }
+]

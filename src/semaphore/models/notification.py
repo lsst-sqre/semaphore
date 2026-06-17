@@ -61,7 +61,7 @@ class CreateUserNotification(BaseModel):
                 "You are using 448GiB of disk out of a quota of 500GiB."
             ],
         ),
-    ]
+    ] = None
 
 
 class UserNotificationBase(BaseModel):

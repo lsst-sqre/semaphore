@@ -18,7 +18,7 @@ from ...models.notification import (
     UserNotificationSummary,
     UserNotificationWithUrl,
 )
-from .models import BroadcastMessageModel
+from .models import BroadcastMessageModel, UserNotificationRead
 
 router = APIRouter(route_class=SlackRouteErrorHandler)
 """FastAPI router for all v1 REST API endpoints."""
@@ -125,6 +125,7 @@ async def admin_list_notifications(
     parsed_cursor = None
     if cursor:
         parsed_cursor = UserNotificationCursor.from_str(cursor)
+    base_url = context.request.url_for("admin_list_notifications")
     results = await service.list_unformatted(
         cursor=parsed_cursor,
         limit=limit,
@@ -132,7 +133,7 @@ async def admin_list_notifications(
         until=until,
         recipient=recipient,
         sender=sender,
-        base_url=context.request.url,
+        base_url=base_url,
     )
     if limit:
         response.headers["Link"] = results.link_header(context.request.url)
@@ -196,12 +197,13 @@ async def list_notifications(
     parsed_cursor = None
     if cursor:
         parsed_cursor = UserNotificationCursor.from_str(cursor)
+    base_url = context.request.url_for("list_notifications")
     results = await service.list_formatted(
         cursor=parsed_cursor,
         limit=limit,
         unread=unread,
         required_recipient=context.username,
-        base_url=context.request.url,
+        base_url=base_url,
     )
     if limit:
         response.headers["Link"] = results.link_header(context.request.url)
@@ -213,13 +215,33 @@ async def list_notifications(
     "/notifications/{id}",
     summary="Get admin notification",
     description="Retrieve a specific admin notification.",
-    tags=["admin", "notifications"],
+    tags=["notifications"],
 )
 async def get_notification(
     id: str,
     *,
     context: Annotated[RequestContext, Depends(context_dependency)],
-    response: Response,
 ) -> UserNotificationFormatted:
     service = context.factory.create_notification_service()
     return await service.get_formatted(id, context.username)
+
+
+@router.post(
+    "/notifications/read",
+    summary="Mark notifications read",
+    description=(
+        "Mark a list of notifications read. Notifications that do not exist"
+        " or that are already marked as read are silently ignored. Returning"
+        " errors for nonexistent notifications is not useful since there may"
+        " be race conditions with services revoking notifications."
+    ),
+    status_code=204,
+    tags=["notifications"],
+)
+async def post_notification_read(
+    read: UserNotificationRead,
+    *,
+    context: Annotated[RequestContext, Depends(context_dependency)],
+) -> None:
+    service = context.factory.create_notification_service()
+    await service.mark_read(read.ids, context.username)
