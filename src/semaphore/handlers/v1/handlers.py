@@ -9,6 +9,7 @@ from safir.slack.webhook import SlackRouteErrorHandler
 from ...broadcast.repository import BroadcastMessageRepository
 from ...dependencies.broadcastrepo import broadcast_repo_dependency
 from ...dependencies.context import RequestContext, context_dependency
+from ...exceptions import PermissionDeniedError
 from ...models.notification import (
     CURSOR_REGEX,
     CreateUserNotification,
@@ -22,6 +23,20 @@ from .models import BroadcastMessageModel, UserNotificationRead
 
 router = APIRouter(route_class=SlackRouteErrorHandler)
 """FastAPI router for all v1 REST API endpoints."""
+
+
+def _check_service_identity(service: str, context: RequestContext) -> None:
+    """Validate that requests to service endpoints use a correct identity.
+
+    The identity must match the URL component and must match the authenticated
+    identity from the context.
+    """
+    if service != context.username:
+        msg = "Service must match authenticated identity"
+        raise PermissionDeniedError(msg)
+    if not service.startswith("bot-"):
+        msg = "Service API only available to bot users"
+        raise PermissionDeniedError(msg)
 
 
 @router.get(
@@ -245,3 +260,121 @@ async def post_notification_read(
 ) -> None:
     service = context.factory.create_notification_service()
     await service.mark_read(read.ids, context.username)
+
+
+@router.post(
+    "/services/{service}/notifications",
+    summary="Create notification",
+    description="Send a notification from a service to a user.",
+    tags=["notifications"],
+)
+async def service_create_notification(
+    service: str,
+    new: CreateUserNotification,
+    *,
+    context: Annotated[RequestContext, Depends(context_dependency)],
+    response: Response,
+) -> UserNotificationWithUrl:
+    _check_service_identity(service, context)
+    notifications = context.factory.create_notification_service()
+    base_url = context.request.url_for(
+        "service_list_notifications", service=service
+    )
+    notification = await notifications.create(context.username, new, base_url)
+    response.headers["Location"] = str(notification.url)
+    return notification
+
+
+@router.get(
+    "/services/{service}/notifications",
+    summary="List service notifications",
+    description="List all current notifications from a specific service.",
+    tags=["notifications"],
+)
+async def service_list_notifications(
+    service: str,
+    *,
+    cursor: Annotated[
+        str | None,
+        Query(
+            title="Cursor",
+            description="Pagination cursor",
+            examples=["1614985055_4234"],
+            pattern=CURSOR_REGEX,
+        ),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        Query(
+            title="Row limit",
+            description="Maximum number of notifications to return.",
+            examples=[500],
+            ge=1,
+        ),
+    ] = None,
+    since: Annotated[
+        UtcDatetime | None,
+        Query(
+            title="Not before",
+            description="Only show entries at or after this time.",
+            examples=["2021-03-05T14:59:52Z"],
+        ),
+    ] = None,
+    until: Annotated[
+        UtcDatetime | None,
+        Query(
+            title="Not after",
+            description="Only show entries before or at this time.",
+            examples=["2021-03-05T14:59:52Z"],
+        ),
+    ] = None,
+    recipient: Annotated[
+        str | None,
+        Query(
+            title="Recipient",
+            description="Limit notifications to this recipient.",
+            examples=["username"],
+        ),
+    ] = None,
+    context: Annotated[RequestContext, Depends(context_dependency)],
+    response: Response,
+) -> list[UserNotificationWithUrl]:
+    _check_service_identity(service, context)
+    notifications = context.factory.create_notification_service()
+    parsed_cursor = None
+    if cursor:
+        parsed_cursor = UserNotificationCursor.from_str(cursor)
+    base_url = context.request.url_for(
+        "service_list_notifications", service=service
+    )
+    results = await notifications.list_unformatted(
+        cursor=parsed_cursor,
+        limit=limit,
+        since=since,
+        until=until,
+        recipient=recipient,
+        sender=service,
+        base_url=base_url,
+    )
+    if limit:
+        response.headers["Link"] = results.link_header(context.request.url)
+        response.headers["X-Total-Count"] = str(results.count)
+    return results.entries
+
+
+@router.get(
+    "/services/{service}/notifications/{id}",
+    summary="Get service notification",
+    description="Retrieve a specific notification from a service.",
+    tags=["notifications"],
+)
+async def service_get_notification(
+    service: str,
+    id: str,
+    *,
+    context: Annotated[RequestContext, Depends(context_dependency)],
+    response: Response,
+) -> UserNotification:
+    _check_service_identity(service, context)
+    notifications = context.factory.create_notification_service()
+    return await notifications.get_unformatted(id, service)

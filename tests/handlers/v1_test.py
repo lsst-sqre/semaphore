@@ -61,22 +61,26 @@ async def test_get_broadcasts(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_notification(
-    data: Data, admin_client: AsyncClient, user_client: AsyncClient
+    *,
+    data: Data,
+    client: AsyncClient,
+    admin_client: AsyncClient,
+    user_client: AsyncClient,
 ) -> None:
     start = datetime.now(tz=UTC).replace(microsecond=0)
 
-    # Send the message. This should succeed and redirect the user to the
+    # Send the message. This should succeed and direct the admin to the
     # specific message within the list of admin notifications. The returned
     # notification should fill out some additional details, such as the
     # message ID, sender, and creation date, but the message should still be
     # unformatted.
     r = await admin_client.post(
         "/semaphore/v1/admin/notifications",
-        json=data.read_json("notifications/example"),
+        json=data.read_json("notifications/create-example"),
     )
     assert_http_response(r, 200)
     sent = r.json()
-    data.assert_json_matches(sent, "api/sent")
+    data.assert_json_matches(sent, "notifications/admin-example")
     created = datetime.fromisoformat(sent["created"])
     assert start <= created <= start + timedelta(seconds=2)
     message_id = sent["id"]
@@ -103,7 +107,7 @@ async def test_notification(
     r = await user_client.get("/semaphore/v1/notifications")
     assert_http_response(r, 200)
     notifications = r.json()
-    data.assert_json_matches(notifications, "api/notifications")
+    data.assert_json_matches(notifications, "notifications/user-one")
     assert datetime.fromisoformat(notifications[0]["created"]) == created
 
     # The individual message should also be retrievable by ID. This should
@@ -112,7 +116,7 @@ async def test_notification(
     r = await user_client.get(notification_url)
     assert_http_response(r, 200)
     notification = r.json()
-    data.assert_json_matches(notification, "api/notification-one")
+    data.assert_json_matches(notification, "notifications/user-example")
     assert datetime.fromisoformat(notification["created"]) == created
 
     # The admin user should not see the notification for the regular user.
@@ -122,12 +126,20 @@ async def test_notification(
     r = await admin_client.get(notification_url)
     assert_http_response(r, 404)
 
+    # Services should not be able to see any of these notifications.
+    r = await client.get(
+        "/semaphore/v1/services/bot-service/notifications",
+        headers={"X-Auth-Request-User": "bot-service"},
+    )
+    assert_http_response(r, 200)
+    assert r.json() == []
+
 
 @pytest.mark.asyncio
 async def test_notification_read(
     data: Data, admin_client: AsyncClient, user_client: AsyncClient
 ) -> None:
-    to_send = data.read_json("notifications/multiple")
+    to_send = data.read_json("notifications/create-multiple")
     for notification in to_send:
         r = await admin_client.post(
             "/semaphore/v1/admin/notifications",
@@ -141,7 +153,7 @@ async def test_notification_read(
     )
     assert_http_response(r, 200)
     notifications = r.json()
-    data.assert_json_matches(notifications, "api/multiple")
+    data.assert_json_matches(notifications, "notifications/user-multiple")
 
     # Mark the first two as read.
     ids = {"ids": [notifications[0]["id"], notifications[1]["id"]]}
@@ -169,8 +181,85 @@ async def test_notification_read(
         assert start <= read <= start + timedelta(seconds=2)
 
 
+@pytest.mark.asyncio
+async def test_notification_service(
+    *,
+    data: Data,
+    client: AsyncClient,
+    service_client: AsyncClient,
+    user_client: AsyncClient,
+) -> None:
+    start = datetime.now(tz=UTC).replace(microsecond=0)
+    example = data.read_json("notifications/service-example")
+    sender = example["sender"]
+    base_url = f"semaphore/v1/services/{sender}/notifications"
+
+    # Send the message. This should succeed and redirect the user to the
+    # specific message within the list of admin notifications. The returned
+    # notification should fill out some additional details, such as the
+    # message ID, sender, and creation date, but the message should still be
+    # unformatted.
+    r = await service_client.post(
+        base_url,
+        json=data.read_json("notifications/create-example"),
+    )
+    assert_http_response(r, 200)
+    sent = r.json()
+    data.assert_json_matches(sent, "notifications/service-example")
+    created = datetime.fromisoformat(sent["created"])
+    assert start <= created <= start + timedelta(seconds=2)
+    message_id = sent["id"]
+    sender = sent["sender"]
+    recipient = sent["recipient"]
+    notification_url = r.headers["Location"]
+    assert notification_url == f"{TEST_BASE_URL}{base_url}/{message_id}"
+    assert sent["url"] == notification_url
+
+    # Retrieve the sent notification. This should be the same but without the
+    # url key.
+    r = await service_client.get(notification_url)
+    assert_http_response(r, 200)
+    assert r.json() == {k: v for k, v in sent.items() if k != "url"}
+
+    # Retrieving the list of all notifications sent by that service should
+    # return a list containing just that notification.
+    r = await service_client.get(base_url)
+    assert_http_response(r, 200)
+    assert r.json() == [sent]
+
+    # The message should then appear for the user.
+    r = await user_client.get("/semaphore/v1/notifications")
+    assert_http_response(r, 200)
+    notifications = r.json()
+    data.assert_json_matches(notifications, "notifications/user-one")
+    assert datetime.fromisoformat(notifications[0]["created"]) == created
+
+    # Retrieving messages for the wrong service should return a 403 error.
+    other_url = "/semaphore/v1/services/bot-other/notifications"
+    r = await service_client.get(other_url)
+    assert_http_response(r, 403)
+    r = await service_client.get(other_url + "/1")
+    assert_http_response(r, 403)
+
+    # Posting messages for the wrong service should return a 403 error.
+    r = await service_client.post(
+        other_url,
+        json=data.read_json("notifications/create-example"),
+    )
+    assert_http_response(r, 403)
+
+    # Authenticating as a user to a service URL should fail with a 403 error.
+    user_url = f"/semaphore/v1/services/{recipient}/notifications"
+    r = await client.get(user_url, headers={"X-Auth-Request-User": recipient})
+    assert_http_response(r, 403)
+
+
 async def setup_paginate_test(
-    data: Data, admin_client: AsyncClient, engine: AsyncEngine
+    data: Data,
+    client: AsyncClient,
+    engine: AsyncEngine,
+    *,
+    as_service: bool = False,
 ) -> None:
     """Create some notifications to test pagination.
 
@@ -182,17 +271,25 @@ async def setup_paginate_test(
         Client that authenticates as an admin.
     engine
         Database engine.
+    as_service
+        If `True`, post messages as a service instead of as an admin.
     """
-    to_send = data.read_json("notifications/pagination")
+    to_send = data.read_json("notifications/create-pagination")
+    if as_service:
+        expected = data.read_json("notifications/service-pagination")
+        sender = expected[0]["sender"]
+        url = f"/semaphore/v1/services/{sender}/notifications"
+    else:
+        url = "/semaphore/v1/admin/notifications"
     for notification in to_send:
-        r = await admin_client.post(
-            "/semaphore/v1/admin/notifications",
-            json=notification,
-        )
+        r = await client.post(url, json=notification)
         assert_http_response(r, 200)
 
     # Adjust the creation timestamps to match the expected data.
-    expected = data.read_json("api/sent-pagination")
+    if as_service:
+        expected = data.read_json("notifications/service-pagination")
+    else:
+        expected = data.read_json("notifications/admin-pagination")
     session = await create_async_session(engine)
     async with session.begin():
         for notification in expected:
@@ -207,9 +304,7 @@ async def setup_paginate_test(
 
 @pytest.mark.asyncio
 async def test_notification_admin_paginate(
-    data: Data,
-    admin_client: AsyncClient,
-    engine: AsyncEngine,
+    data: Data, admin_client: AsyncClient, engine: AsyncEngine
 ) -> None:
     await setup_paginate_test(data, admin_client, engine)
 
@@ -217,7 +312,7 @@ async def test_notification_admin_paginate(
     r = await admin_client.get("/semaphore/v1/admin/notifications")
     assert_http_response(r, 200)
     notifications = r.json()
-    data.assert_json_matches(notifications, "api/sent-pagination")
+    data.assert_json_matches(notifications, "notifications/admin-pagination")
 
     # Retrieve the notifications one at a time to test pagination. Limit to
     # the sender, which should produce the same results (all the notifications
@@ -288,7 +383,7 @@ async def test_notification_user_paginate(
     r = await user_client.get("/semaphore/v1/notifications")
     assert_http_response(r, 200)
     notifications = r.json()
-    data.assert_json_matches(notifications, "api/notifications-pagination")
+    data.assert_json_matches(notifications, "notifications/user-pagination")
 
     # Retrieve the notifications one at a time to test pagination.
     r = await user_client.get(
@@ -309,3 +404,67 @@ async def test_notification_user_paginate(
     r = await user_client.get(links.prev_url)
     assert_http_response(r, 200)
     assert r.json() == [notifications[0]]
+
+
+@pytest.mark.asyncio
+async def test_notification_service_paginate(
+    data: Data,
+    service_client: AsyncClient,
+    engine: AsyncEngine,
+) -> None:
+    await setup_paginate_test(data, service_client, engine, as_service=True)
+
+    # Retrieve all of the notifications.
+    expected = data.read_json("notifications/service-pagination")
+    sender = expected[0]["sender"]
+    url = f"/semaphore/v1/services/{sender}/notifications"
+    r = await service_client.get(url)
+    assert_http_response(r, 200)
+    notifications = r.json()
+    data.assert_json_matches(notifications, "notifications/service-pagination")
+
+    # Retrieve the notifications one at a time to test pagination.
+    r = await service_client.get(url, params={"limit": "1"})
+    assert_http_response(r, 200)
+    assert r.json() == [notifications[0]]
+    assert r.headers["X-Total-Count"] == str(len(notifications))
+    links = PaginationLinkData.from_header(r.headers["Link"])
+    assert links.next_url
+    r = await service_client.get(links.next_url)
+    assert_http_response(r, 200)
+    assert r.json() == [notifications[1]]
+    assert r.headers["X-Total-Count"] == str(len(notifications))
+    links = PaginationLinkData.from_header(r.headers["Link"])
+    assert links.next_url
+    assert links.prev_url
+    r = await service_client.get(links.prev_url)
+    assert_http_response(r, 200)
+    assert r.json() == [notifications[0]]
+    r = await service_client.get(links.next_url)
+    assert_http_response(r, 200)
+    assert r.json() == notifications[2:]
+
+    # Restrict to a specific user and request pagination.
+    r = await service_client.get(
+        url,
+        params={"limit": "1", "recipient": notifications[0]["recipient"]},
+    )
+    assert_http_response(r, 200)
+    assert r.json() == [notifications[0]]
+    links = PaginationLinkData.from_header(r.headers["Link"])
+    assert not links.next_url
+    assert r.headers["X-Total-Count"] == "1"
+
+    # Request the first two notifications by created date.
+    r = await service_client.get(
+        url, params={"since": notifications[1]["created"]}
+    )
+    assert_http_response(r, 200)
+    assert r.json() == notifications[:2]
+
+    # Request the last two notifications by created date.
+    r = await service_client.get(
+        url, params={"until": notifications[1]["created"]}
+    )
+    assert_http_response(r, 200)
+    assert r.json() == notifications[1:]
