@@ -35,11 +35,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 @pytest_asyncio.fixture
 async def admin_client(app: FastAPI) -> AsyncGenerator[AsyncClient]:
-    """Client authenticated as an admin user.
-
-    Currently, this just sets a username. Eventually it will integrate with
-    the Gafaelfawr mock.
-    """
+    """Client authenticated as an admin user."""
     async with AsyncClient(
         base_url=TEST_BASE_URL,
         headers={"X-Auth-Request-User": "admin"},
@@ -93,12 +89,19 @@ async def engine() -> AsyncGenerator[AsyncEngine]:
 
 
 @pytest_asyncio.fixture
-async def user_client(app: FastAPI) -> AsyncGenerator[AsyncClient]:
-    """Client authenticated as a regular user.
+async def service_client(app: FastAPI) -> AsyncGenerator[AsyncClient]:
+    """Client authenticated as a service user."""
+    async with AsyncClient(
+        base_url=TEST_BASE_URL,
+        headers={"X-Auth-Request-User": "bot-service"},
+        transport=ASGITransport(app=app),
+    ) as client:
+        yield client
 
-    Currently, this just sets a username. Eventually it will integrate with
-    the Gafaelfawr mock.
-    """
+
+@pytest_asyncio.fixture
+async def user_client(app: FastAPI) -> AsyncGenerator[AsyncClient]:
+    """Client authenticated as a regular user."""
     async with AsyncClient(
         base_url=TEST_BASE_URL,
         headers={"X-Auth-Request-User": "some-user"},
