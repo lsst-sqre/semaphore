@@ -124,6 +124,10 @@ def docs(session: nox.Session) -> None:
             str(doctree_dir),
             ".",
             "./_build/html",
+            env={
+                "SEMAPHORE_DATABASE_URL": "postgresql://localhost/semaphore",
+                "SEMAPHORE_PHALANX_ENV": "idfdev",
+            },
         )
 
 
@@ -139,6 +143,10 @@ def docs_clean(session: nox.Session) -> None:
 def docs_linkcheck(session: nox.Session) -> None:
     """Check links in the documentation."""
     doctree_dir = (session.cache_dir / "doctrees").absolute()
+    env = {
+        "SEMAPHORE_DATABASE_URL": "postgresql://localhost/semaphore",
+        "SEMAPHORE_PHALANX_ENV": "idfdev",
+    }
     with session.chdir("docs"):
         try:
             session.run(
@@ -153,6 +161,7 @@ def docs_linkcheck(session: nox.Session) -> None:
                 str(doctree_dir),
                 ".",
                 "./_build/linkcheck",
+                env=env,
             )
         except CommandFailed:
             output_path = Path("_build") / "linkcheck" / "output.txt"
