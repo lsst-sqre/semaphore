@@ -302,6 +302,69 @@ async def setup_paginate_test(
             )
 
 
+async def check_pagination(
+    client: AsyncClient,
+    url: str,
+    notifications: list[dict[str, Any]],
+    *,
+    params: dict[str, str] | None = None,
+) -> None:
+    """Test pagination of an API.
+
+    Parameters
+    ----------
+    client
+        Client to use to make the request.
+    url
+        URL to which to make the request.
+    notifications
+        Expected complete results in JSON-serialized form.
+    params
+        Additional parameters to pass to the request.
+    """
+    params = params.copy() if params else {}
+
+    r = await client.get(url, params={**params, "limit": "1"})
+    assert_http_response(r, 200)
+
+    # Check the first reply, which should contain only the first element.
+    if len(notifications) > 0:
+        assert r.json() == [notifications[0]]
+    else:
+        assert r.json() == []
+    assert r.headers["X-Total-Count"] == str(len(notifications))
+
+    # Parse the Link header if expecting more than one result. Otherwise,
+    # there should be no Link header.
+    links = PaginationLinkData.from_header(r.headers["Link"])
+    if len(notifications) <= 1:
+        assert not links.next_url
+        return
+    assert links.next_url
+
+    # Get the next batch of one.
+    r = await client.get(links.next_url)
+    assert_http_response(r, 200)
+    assert r.json() == [notifications[1]]
+    assert r.headers["X-Total-Count"] == str(len(notifications))
+
+    # Get the previous page, which should just be the first notification.
+    links = PaginationLinkData.from_header(r.headers["Link"])
+    assert links.prev_url
+    r = await client.get(links.prev_url)
+    assert_http_response(r, 200)
+    assert r.json() == [notifications[0]]
+
+    # If there are more notifications, get the next page.
+    if len(notifications) > 2:
+        assert links.next_url
+        r = await client.get(links.next_url)
+        assert_http_response(r, 200)
+        assert r.json() == [notifications[2]]
+    else:
+        assert not links.next_url
+
+
 @pytest.mark.asyncio
 async def test_notification_admin_paginate(
     data: Data, admin_client: AsyncClient, engine: AsyncEngine
@@ -318,39 +381,20 @@ async def test_notification_admin_paginate(
     # the sender, which should produce the same results (all the notifications
     # were sent by the same user), but helps check that the per-notification
     # URLs don't include the search string.
-    r = await admin_client.get(
+    await check_pagination(
+        admin_client,
         "/semaphore/v1/admin/notifications",
-        params={"limit": "1", "sender": notifications[0]["sender"]},
+        notifications,
+        params={"sender": notifications[0]["sender"]},
     )
-    assert_http_response(r, 200)
-    assert r.json() == [notifications[0]]
-    assert r.headers["X-Total-Count"] == str(len(notifications))
-    links = PaginationLinkData.from_header(r.headers["Link"])
-    assert links.next_url
-    r = await admin_client.get(links.next_url)
-    assert_http_response(r, 200)
-    assert r.json() == [notifications[1]]
-    assert r.headers["X-Total-Count"] == str(len(notifications))
-    links = PaginationLinkData.from_header(r.headers["Link"])
-    assert links.next_url
-    assert links.prev_url
-    r = await admin_client.get(links.prev_url)
-    assert_http_response(r, 200)
-    assert r.json() == [notifications[0]]
-    r = await admin_client.get(links.next_url)
-    assert_http_response(r, 200)
-    assert r.json() == notifications[2:]
 
-    # Restrict to a specific user and request pagination.
-    r = await admin_client.get(
+    # Restrict to a specific user, which should return only one result.
+    await check_pagination(
+        admin_client,
         "/semaphore/v1/admin/notifications",
-        params={"limit": "1", "recipient": notifications[0]["recipient"]},
+        [notifications[0]],
+        params={"recipient": notifications[0]["recipient"]},
     )
-    assert_http_response(r, 200)
-    assert r.json() == [notifications[0]]
-    links = PaginationLinkData.from_header(r.headers["Link"])
-    assert not links.next_url
-    assert r.headers["X-Total-Count"] == "1"
 
     # Request the first two notifications by created date.
     r = await admin_client.get(
@@ -386,24 +430,9 @@ async def test_notification_user_paginate(
     data.assert_json_matches(notifications, "notifications/user-pagination")
 
     # Retrieve the notifications one at a time to test pagination.
-    r = await user_client.get(
-        "/semaphore/v1/notifications", params={"limit": "1"}
+    await check_pagination(
+        user_client, "/semaphore/v1/notifications", notifications
     )
-    assert_http_response(r, 200)
-    assert r.json() == [notifications[0]]
-    assert r.headers["X-Total-Count"] == str(len(notifications))
-    links = PaginationLinkData.from_header(r.headers["Link"])
-    assert links.next_url
-    r = await user_client.get(links.next_url)
-    assert_http_response(r, 200)
-    assert r.json() == [notifications[1]]
-    assert r.headers["X-Total-Count"] == str(len(notifications))
-    links = PaginationLinkData.from_header(r.headers["Link"])
-    assert not links.next_url
-    assert links.prev_url
-    r = await user_client.get(links.prev_url)
-    assert_http_response(r, 200)
-    assert r.json() == [notifications[0]]
 
 
 @pytest.mark.asyncio
@@ -424,36 +453,15 @@ async def test_notification_service_paginate(
     data.assert_json_matches(notifications, "notifications/service-pagination")
 
     # Retrieve the notifications one at a time to test pagination.
-    r = await service_client.get(url, params={"limit": "1"})
-    assert_http_response(r, 200)
-    assert r.json() == [notifications[0]]
-    assert r.headers["X-Total-Count"] == str(len(notifications))
-    links = PaginationLinkData.from_header(r.headers["Link"])
-    assert links.next_url
-    r = await service_client.get(links.next_url)
-    assert_http_response(r, 200)
-    assert r.json() == [notifications[1]]
-    assert r.headers["X-Total-Count"] == str(len(notifications))
-    links = PaginationLinkData.from_header(r.headers["Link"])
-    assert links.next_url
-    assert links.prev_url
-    r = await service_client.get(links.prev_url)
-    assert_http_response(r, 200)
-    assert r.json() == [notifications[0]]
-    r = await service_client.get(links.next_url)
-    assert_http_response(r, 200)
-    assert r.json() == notifications[2:]
+    await check_pagination(service_client, url, notifications)
 
     # Restrict to a specific user and request pagination.
-    r = await service_client.get(
+    await check_pagination(
+        service_client,
         url,
-        params={"limit": "1", "recipient": notifications[0]["recipient"]},
+        [notifications[0]],
+        params={"recipient": notifications[0]["recipient"]},
     )
-    assert_http_response(r, 200)
-    assert r.json() == [notifications[0]]
-    links = PaginationLinkData.from_header(r.headers["Link"])
-    assert not links.next_url
-    assert r.headers["X-Total-Count"] == "1"
 
     # Request the first two notifications by created date.
     r = await service_client.get(
