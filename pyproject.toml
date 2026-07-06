@@ -35,7 +35,7 @@ dependencies = [
     "python-dateutil",
     "python-multipart",
     "pyyaml",
-    "safir[db]>=15.1.1",
+    "safir[db]>=15.2.0",
     "starlette>=1.0.1",
     "sqlalchemy[asyncio]>=2",
     "structlog",
