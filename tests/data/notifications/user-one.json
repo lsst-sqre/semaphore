@@ -7,6 +7,6 @@
       "gfm": "This is a *notification*",
       "html": "This is a <em>notification</em>"
     },
-    "url": "https://example.com/semaphore/v1/notifications/1"
+    "url": "https://example.com/semaphore/v1/notifications/messages/1"
   }
 ]

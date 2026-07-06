@@ -104,7 +104,7 @@ async def test_notification(
     # Retrieving messages for the recipient user should also retrieve a list
     # of message summaries containing that message, with the summary
     # formatted and a URL to the full message.
-    r = await user_client.get("/semaphore/v1/notifications")
+    r = await user_client.get("/semaphore/v1/notifications/messages")
     assert_http_response(r, 200)
     notifications = r.json()
     data.assert_json_matches(notifications, "notifications/user-one")
@@ -120,7 +120,7 @@ async def test_notification(
     assert datetime.fromisoformat(notification["created"]) == created
 
     # The admin user should not see the notification for the regular user.
-    r = await admin_client.get("/semaphore/v1/notifications")
+    r = await admin_client.get("/semaphore/v1/notifications/messages")
     assert_http_response(r, 200)
     assert r.json() == []
     r = await admin_client.get(notification_url)
@@ -149,7 +149,7 @@ async def test_notification_read(
 
     # Listing all unread notifications should return all three.
     r = await user_client.get(
-        "/semaphore/v1/notifications", params={"unread": "true"}
+        "/semaphore/v1/notifications/messages", params={"unread": "true"}
     )
     assert_http_response(r, 200)
     notifications = r.json()
@@ -163,14 +163,14 @@ async def test_notification_read(
 
     # Now, listing all unread notifications returns only the third.
     r = await user_client.get(
-        "/semaphore/v1/notifications", params={"unread": "true"}
+        "/semaphore/v1/notifications/messages", params={"unread": "true"}
     )
     assert_http_response(r, 200)
     assert r.json() == notifications[2:]
 
     # Listing all notifications still returns all three, but now with read
     # timestamps.
-    r = await user_client.get("/semaphore/v1/notifications")
+    r = await user_client.get("/semaphore/v1/notifications/messages")
     assert_http_response(r, 200)
     updated_notifications = r.json()
     notifications[0]["read"] = ANY
@@ -228,7 +228,7 @@ async def test_notification_service(
     assert r.json() == [sent]
 
     # The message should then appear for the user.
-    r = await user_client.get("/semaphore/v1/notifications")
+    r = await user_client.get("/semaphore/v1/notifications/messages")
     assert_http_response(r, 200)
     notifications = r.json()
     data.assert_json_matches(notifications, "notifications/user-one")
@@ -424,14 +424,14 @@ async def test_notification_user_paginate(
     await setup_paginate_test(data, admin_client, engine)
 
     # Retrieve all of the notifications.
-    r = await user_client.get("/semaphore/v1/notifications")
+    r = await user_client.get("/semaphore/v1/notifications/messages")
     assert_http_response(r, 200)
     notifications = r.json()
     data.assert_json_matches(notifications, "notifications/user-pagination")
 
     # Retrieve the notifications one at a time to test pagination.
     await check_pagination(
-        user_client, "/semaphore/v1/notifications", notifications
+        user_client, "/semaphore/v1/notifications/messages", notifications
     )
 
 
