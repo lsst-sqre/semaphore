@@ -19,7 +19,11 @@ from ...models.notification import (
     UserNotificationSummary,
     UserNotificationWithUrl,
 )
-from .models import BroadcastMessageModel, UserNotificationRead
+from .models import (
+    BroadcastMessageModel,
+    UserNotificationRead,
+    UserNotificationUnread,
+)
 
 router = APIRouter(route_class=SlackRouteErrorHandler)
 """FastAPI router for all v1 REST API endpoints."""
@@ -260,6 +264,27 @@ async def post_notification_read(
 ) -> None:
     service = context.factory.create_notification_service()
     await service.mark_read(read.ids, context.username)
+
+
+@router.post(
+    "/notifications/unread",
+    summary="Mark notifications unread",
+    description=(
+        "Mark a list of notifications unread. Notifications that do not exist"
+        " or that are not marked as read are silently ignored. Returning"
+        " errors for nonexistent notifications is not useful since there may"
+        " be race conditions with services revoking notifications."
+    ),
+    status_code=204,
+    tags=["notifications"],
+)
+async def post_notification_unread(
+    read: UserNotificationUnread,
+    *,
+    context: Annotated[RequestContext, Depends(context_dependency)],
+) -> None:
+    service = context.factory.create_notification_service()
+    await service.mark_unread(read.ids, context.username)
 
 
 @router.post(

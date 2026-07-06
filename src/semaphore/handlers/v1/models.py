@@ -124,3 +124,19 @@ class UserNotificationRead(BaseModel):
             examples=[{"56", "57", "58", "59"}],
         ),
     ]
+
+
+class UserNotificationUnread(BaseModel):
+    """Notification IDs to mark as unread."""
+
+    ids: Annotated[
+        set[str],
+        Field(
+            title="Notification IDs",
+            description=(
+                "These notifications will be marked as unread if they are"
+                " currently marked as read."
+            ),
+            examples=[{"56", "57", "58", "59"}],
+        ),
+    ]

@@ -161,3 +161,23 @@ class UserNotificationStore:
         notifications = await self._session.scalars(stmt)
         for notification in notifications:
             notification.read = now
+
+    async def mark_unread(self, recipient: str, ids: set[str]) -> None:
+        """Mark a set of notification IDs as unread.
+
+        Parameters
+        ----------
+        recipient
+            Only act on notifications sent to this recipient.
+        ids
+            Set of IDs to mark as unread.
+        """
+        ids_int = [int(v) for v in ids]
+        stmt = select(SQLUserNotification).where(
+            SQLUserNotification.recipient == recipient,
+            SQLUserNotification.id.in_(ids_int),
+            SQLUserNotification.read.isnot(None),
+        )
+        notifications = await self._session.scalars(stmt)
+        for notification in notifications:
+            notification.read = None

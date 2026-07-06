@@ -286,3 +286,23 @@ class UserNotificationService:
         """
         async with self._session.begin():
             await self._storage.mark_read(required_recipient, ids)
+
+    async def mark_unread(
+        self, ids: set[str], required_recipient: str
+    ) -> None:
+        """Mark a set of notifications as unread.
+
+        Notifications that were not marked as read will be silently left
+        unchanged, as will notifications that don't exist. Error reporting is
+        not useful here since there may be a race condition with revoking
+        notifications.
+
+        Parameters
+        ----------
+        ids
+            Notification IDs to mark as unread.
+        required_recipient
+            Only operate on notifications sent to this username.
+        """
+        async with self._session.begin():
+            await self._storage.mark_unread(required_recipient, ids)
