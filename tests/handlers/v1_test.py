@@ -180,6 +180,18 @@ async def test_notification_read(
         read = datetime.fromisoformat(updated_notifications[index]["read"])
         assert start <= read <= start + timedelta(seconds=2)
 
+    # Marking the second notification unread causes it to be returned again
+    # and clears the read timestamp.
+    ids = {"ids": [notifications[1]["id"]]}
+    r = await user_client.post("/semaphore/v1/notifications/unread", json=ids)
+    assert_http_response(r, 204)
+    notifications[1]["read"] = None
+    r = await user_client.get(
+        "/semaphore/v1/notifications/messages", params={"unread": "true"}
+    )
+    assert_http_response(r, 200)
+    assert r.json() == notifications[1:]
+
 
 @pytest.mark.asyncio
 async def test_notification_service(
