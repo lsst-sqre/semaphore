@@ -173,7 +173,7 @@ async def admin_get_notification(
 
 
 @router.get(
-    "/notifications",
+    "/notifications/messages",
     summary="List notifications",
     description="List all current notifications for the authenticated user.",
     tags=["notifications"],
@@ -227,9 +227,9 @@ async def list_notifications(
 
 
 @router.get(
-    "/notifications/{id}",
-    summary="Get admin notification",
-    description="Retrieve a specific admin notification.",
+    "/notifications/messages/{id}",
+    summary="Get notification",
+    description="Retrieve a specific notification.",
     tags=["notifications"],
 )
 async def get_notification(

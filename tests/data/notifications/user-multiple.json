@@ -7,7 +7,7 @@
       "gfm": "Notification three",
       "html": "Notification three"
     },
-    "url": "https://example.com/semaphore/v1/notifications/3"
+    "url": "https://example.com/semaphore/v1/notifications/messages/3"
   },
   {
     "created": "<ANY>",
@@ -17,7 +17,7 @@
       "gfm": "Notification two",
       "html": "Notification two"
     },
-    "url": "https://example.com/semaphore/v1/notifications/2"
+    "url": "https://example.com/semaphore/v1/notifications/messages/2"
   },
   {
     "created": "<ANY>",
@@ -27,6 +27,6 @@
       "gfm": "Notification one",
       "html": "Notification one"
     },
-    "url": "https://example.com/semaphore/v1/notifications/1"
+    "url": "https://example.com/semaphore/v1/notifications/messages/1"
   }
 ]
