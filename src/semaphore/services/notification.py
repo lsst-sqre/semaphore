@@ -198,33 +198,23 @@ class UserNotificationService:
                 unread=unread,
             )
 
-        # This produces a CountedPaginatedList of UserNotifications, which
-        # must now be formatted.
-        formatted_entries = []
-        for result in unformatted.entries:
-            html_summary = self._markdown.renderInline(result.summary)
-            summary = FormattedText(gfm=result.summary, html=html_summary)
-            url = HttpUrl(f"{base_url!s}/{result.id}")
-            formatted = UserNotificationSummary(
-                id=result.id,
+        # The above produces a CountedPaginatedList of UserNotifications. Each
+        # of those notifications must now be formatted. This method formats a
+        # since notification.
+        def format_entry(entry: UserNotification) -> UserNotificationSummary:
+            html_summary = self._markdown.renderInline(entry.summary)
+            summary = FormattedText(gfm=entry.summary, html=html_summary)
+            url = HttpUrl(f"{base_url!s}/{entry.id}")
+            return UserNotificationSummary(
+                id=entry.id,
                 summary=summary,
-                created=result.created,
-                read=result.read,
+                created=entry.created,
+                read=entry.read,
                 url=url,
             )
-            formatted_entries.append(formatted)
 
-        # This requires creating a new CountedPaginatedList, which in turn
-        # requires knowing what fields to copy. This is not ideal and should
-        # have better support in Safir.
-        return CountedPaginatedList[
-            UserNotificationSummary, UserNotificationCursor
-        ](
-            entries=formatted_entries,
-            next_cursor=unformatted.next_cursor,
-            prev_cursor=unformatted.prev_cursor,
-            count=unformatted.count,
-        )
+        # Return the transformed list.
+        return CountedPaginatedList.from_transform(unformatted, format_entry)
 
     async def list_unformatted(
         self,
@@ -258,7 +248,7 @@ class UserNotificationService:
 
         Returns
         -------
-        CountedPaginatedList of UserNotification
+        CountedPaginatedList of UserNotificationWithUrl
             Matching user notifications, possibly paginated depending on the
             request parameters.
         """
@@ -272,23 +262,12 @@ class UserNotificationService:
                 sender=sender,
             )
 
-        # Add the URLs to the entries.
-        entries = [
-            UserNotificationWithUrl.from_notification(e, base_url)
-            for e in results.entries
-        ]
+        # Define a transform to add a URL to an entry.
+        def add_url(entry: UserNotification) -> UserNotificationWithUrl:
+            return UserNotificationWithUrl.from_notification(entry, base_url)
 
-        # This requires creating a new CountedPaginatedList, which in turn
-        # requires knowing what fields to copy. This is not ideal and should
-        # have better support in Safir.
-        return CountedPaginatedList[
-            UserNotificationWithUrl, UserNotificationCursor
-        ](
-            entries=entries,
-            next_cursor=results.next_cursor,
-            prev_cursor=results.prev_cursor,
-            count=results.count,
-        )
+        # Return the transformed paginated list.
+        return CountedPaginatedList.from_transform(results, add_url)
 
     async def mark_read(self, ids: set[str], required_recipient: str) -> None:
         """Mark a set of notifications as read.
