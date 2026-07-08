@@ -7,6 +7,21 @@ Find changes for the upcoming release in the project's [changelog.d directory](h
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-2.0.0'></a>
+## 2.0.0 (2026-07-08)
+
+### Backwards-incompatible changes
+
+- Add support for creating, listing, and retrieving user notifications. Either services or administrators can create notifications. Services can only manage the notifications that the service created. Semaphore now requires a PostgreSQL database for storage of user notifications.
+
+### Bug fixes
+
+- Fix serving of API documentation. A previous refactor caused FastAPI to incorrectly mount the documentation links on paths with an initial double slash.
+
+### Other changes
+
+- Semaphore now uses [nox](https://nox.thea.codes/en/stable/index.html) as the build system for development and testing instead of tox.
+
 <a id='changelog-1.0.1'></a>
 ## 1.0.1 (2026-05-26)
 
