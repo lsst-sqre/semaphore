@@ -179,8 +179,10 @@ class UserNotificationWithUrl(UserNotification):
             title="URL",
             description="URL to the sent notification.",
             examples=[
-                "https://data.example.com/semaphore/v1/admin/notifications/"
-                "4561-a7513"
+                (
+                    "https://data.example.com/semaphore/v1/admin"
+                    "/notifications/4561-a7513"
+                )
             ],
         ),
     ]
@@ -251,8 +253,10 @@ class UserNotificationSummary(UserNotificationBase):
             title="URL",
             description="URL to the sent notification.",
             examples=[
-                "https://data.example.com/semaphore/v1/admin/notifications/"
-                "4561-a7513"
+                (
+                    "https://data.example.com/semaphore/v1/admin"
+                    "/notifications/4561-a7513"
+                )
             ],
         ),
     ]
