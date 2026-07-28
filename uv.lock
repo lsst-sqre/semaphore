@@ -2019,6 +2019,7 @@ dev = [
     { name = "pytest-sugar" },
     { name = "pytest-xdist", extra = ["psutil"] },
     { name = "testcontainers" },
+    { name = "uv" },
 ]
 docs = [
     { name = "documenteer", extra = ["guide"] },
@@ -2027,7 +2028,6 @@ docs = [
 lint = [
     { name = "prek" },
     { name = "ruff" },
-    { name = "uv" },
 ]
 nox = [
     { name = "nox" },
@@ -2076,6 +2076,7 @@ dev = [
     { name = "pytest-sugar" },
     { name = "pytest-xdist", extras = ["psutil"] },
     { name = "testcontainers", extras = ["postgres"] },
+    { name = "uv" },
 ]
 docs = [
     { name = "documenteer", extras = ["guide"] },
@@ -2084,7 +2085,6 @@ docs = [
 lint = [
     { name = "prek" },
     { name = "ruff", specifier = ">=0.9" },
-    { name = "uv" },
 ]
 nox = [
     { name = "nox" },

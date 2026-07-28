@@ -65,6 +65,7 @@ dev = [
     "pytest-sugar",
     "pytest-xdist[psutil]",
     "testcontainers[postgres]",
+    "uv",
 ]
 docs = [
     "documenteer[guide]",
@@ -73,7 +74,6 @@ docs = [
 lint = [
     "prek",
     "ruff>=0.9",
-    "uv",
 ]
 nox = [
     "nox",
