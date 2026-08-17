@@ -137,7 +137,7 @@ jobs:
 
   build:
     concurrency:
-      group: packages
+      group: docker
       queue: max
     needs: [test]
     secrets: inherit
