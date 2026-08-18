@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Initialize the database.
     await db_session_dependency.initialize(
-        config.database_url, config.database_password
+        config.database_url, config.database_password, pool_pre_ping=True
     )
 
     # Initialize the broadcast GitHub repository.
