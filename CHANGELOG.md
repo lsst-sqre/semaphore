@@ -7,6 +7,14 @@ Find changes for the upcoming release in the project's [changelog.d directory](h
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-2.0.1'></a>
+## 2.0.1 (2026-09-14)
+
+### Other changes
+
+- Enable SQLAlchemy pessimistic connection checking (`pool_pre_ping=True`) on the database session dependency, following the recommendation added in Safir 15.2.0. A connection dropped by the database server while the service was idle is now detected and replaced transparently instead of failing the next request.
+- Update pinned dependencies, including GitPython 3.1.62 and Tornado 6.5.8, which pick up the security fixes proposed by Dependabot.
+
 <a id='changelog-2.0.0'></a>
 ## 2.0.0 (2026-07-08)
 
