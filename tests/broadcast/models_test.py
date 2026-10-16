@@ -1,6 +1,6 @@
 """Tests for the semaphore.broadcast.models module."""
 
-import datetime
+from datetime import timedelta
 
 import arrow
 from dateutil.rrule import DAILY, HOURLY, rrule, rruleset
@@ -68,7 +68,7 @@ def test_broadcastmessage_disabled() -> None:
 def test_onetimescheduler_active() -> None:
     """Test a OneTimeScheduler that is currently active."""
     start = arrow.utcnow().shift(minutes=-1)
-    s = OneTimeScheduler.from_ttl(start, datetime.timedelta(hours=1))
+    s = OneTimeScheduler.from_ttl(start, timedelta(hours=1))
     assert s.is_active() is True
     assert s.has_future_events() is False
     assert s.is_stale() is False
@@ -113,7 +113,7 @@ def test_openendedcheduler_active() -> None:
 def test_onetimescheduler_past() -> None:
     """Test a OneTimeScheduler that was in the past."""
     start = arrow.utcnow().shift(hours=-1)
-    s = OneTimeScheduler.from_ttl(start, datetime.timedelta(minutes=1))
+    s = OneTimeScheduler.from_ttl(start, timedelta(minutes=1))
     assert s.is_active() is False
     assert s.has_future_events() is False
     assert s.is_stale() is True
@@ -122,7 +122,7 @@ def test_onetimescheduler_past() -> None:
 def test_onetimescheduler_future() -> None:
     """Test a OneTimeScheduler that is in the future."""
     start = arrow.utcnow().shift(hours=1)
-    s = OneTimeScheduler.from_ttl(start, datetime.timedelta(minutes=1))
+    s = OneTimeScheduler.from_ttl(start, timedelta(minutes=1))
     assert s.is_active() is False
     assert s.has_future_events() is True
     assert s.is_stale() is False
@@ -131,7 +131,7 @@ def test_onetimescheduler_future() -> None:
 def test_recurring_active() -> None:
     """Test a RecurringScheduler that should be currently active."""
     start = arrow.utcnow().floor("second").shift(minutes=-10)
-    ttl = datetime.timedelta(hours=1)
+    ttl = timedelta(hours=1)
     rset = rruleset(cache=True)
     rset.rrule(rrule(freq=DAILY, dtstart=start.datetime))
     s = RecurringScheduler(rset, ttl)
@@ -146,7 +146,7 @@ def test_recurring_noevents() -> None:
     """Test a RecurringScheduler that has no future events."""
     # No future events because of the recurrence count being limited
     start = arrow.utcnow().floor("second").shift(hours=-10)
-    ttl = datetime.timedelta(hours=1)
+    ttl = timedelta(hours=1)
     rset = rruleset(cache=True)
     rset.rrule(rrule(freq=HOURLY, dtstart=start.datetime, count=2))
     s = RecurringScheduler(rset, ttl)
@@ -160,7 +160,7 @@ def test_recurring_future() -> None:
     # Set the start date to 10 hours ago, recurring daily with a TTL of 1 hr
     # The next event is 1 day from now.
     start = arrow.utcnow().floor("second").shift(hours=-10)
-    ttl = datetime.timedelta(hours=1)
+    ttl = timedelta(hours=1)
     rset = rruleset(cache=True)
     rset.rrule(rrule(freq=DAILY, dtstart=start.datetime))
     s = RecurringScheduler(rset, ttl)
@@ -172,7 +172,7 @@ def test_recurring_future() -> None:
 def test_recurringing_propose_next() -> None:
     """Test a RecurringingScheduler that needs to propose a next start time."""
     now = arrow.utcnow().floor("second")
-    ttl = datetime.timedelta(hours=1)
+    ttl = timedelta(hours=1)
     rset = rruleset(cache=True)
     rset.rrule(rrule(freq=DAILY, dtstart=now.shift(days=-2).datetime))
     s = RecurringScheduler(rset, ttl)

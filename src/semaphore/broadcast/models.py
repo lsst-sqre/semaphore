@@ -1,8 +1,8 @@
 """Domain models for broadcast messages."""
 
-import datetime
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import cast, override
 
@@ -107,9 +107,7 @@ class OneTimeScheduler(Scheduler):
     """The end date."""
 
     @classmethod
-    def from_ttl(
-        cls, start: arrow.Arrow, ttl: datetime.timedelta
-    ) -> OneTimeScheduler:
+    def from_ttl(cls, start: arrow.Arrow, ttl: timedelta) -> OneTimeScheduler:
         """Create a OneTimeScheduler given a known start date and a TTL.
 
         Parameters
@@ -151,7 +149,7 @@ class RecurringScheduler(Scheduler):
     """
 
     def __init__(
-        self, rruleset: dateutil.rrule.rruleset, ttl: datetime.timedelta
+        self, rruleset: dateutil.rrule.rruleset, ttl: timedelta
     ) -> None:
         self.rruleset = rruleset
         self.ttl = ttl
@@ -236,7 +234,7 @@ class RecurringScheduler(Scheduler):
             Raised if a start/end time can't be proposed based on the
             rule set.
         """
-        after_datetime = cast("datetime.datetime", after)
+        after_datetime = cast("datetime", after)
         candidate_start = self.rruleset.after(after_datetime, inc=False)
         if candidate_start is None:
             raise ValueError

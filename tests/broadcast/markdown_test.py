@@ -1,7 +1,6 @@
 """Tests for the semaphore.broadcast.markdown module."""
 
-import datetime
-from datetime import UTC
+from datetime import UTC, datetime
 
 import arrow
 import dateutil
@@ -220,10 +219,10 @@ def test_defer_expire(data: Data) -> None:
     scheduler = broadcast.scheduler
     assert isinstance(scheduler, OneTimeScheduler)
     assert scheduler.start == arrow.get(
-        datetime.datetime(2021, 1, 1, tzinfo=UTC),
+        datetime(2021, 1, 1, tzinfo=UTC),
     )
     assert scheduler.end == arrow.get(
-        datetime.datetime(2021, 1, 2, tzinfo=UTC),
+        datetime(2021, 1, 2, tzinfo=UTC),
     )
 
 
@@ -249,10 +248,10 @@ def test_defer_expire_fuzzy(data: Data) -> None:
     scheduler = broadcast.scheduler
     assert isinstance(scheduler, OneTimeScheduler)
     assert scheduler.start == arrow.get(
-        datetime.datetime(2021, 1, 1, 12, tzinfo=UTC),
+        datetime(2021, 1, 1, 12, tzinfo=UTC),
     )
     assert scheduler.end == arrow.get(
-        datetime.datetime(2021, 1, 2, 4, tzinfo=UTC),
+        datetime(2021, 1, 2, 4, tzinfo=UTC),
     )
 
 
@@ -267,7 +266,7 @@ def test_defer_expire_fuzzy_default_tz(data: Data) -> None:
     scheduler = broadcast.scheduler
     assert isinstance(scheduler, OneTimeScheduler)
     assert scheduler.start == arrow.get(
-        datetime.datetime(2021, 1, 1, 12, tzinfo=UTC),
+        datetime(2021, 1, 1, 12, tzinfo=UTC),
     )
     assert scheduler.end == arrow.get(
         "2021-01-02 04:00 America/Los_Angeles", "YYYY-MM-DD HH:mm ZZZ"
@@ -282,12 +281,8 @@ def test_defer_ttl(data: Data) -> None:
     broadcast = md.to_broadcast()
     scheduler = broadcast.scheduler
     assert isinstance(scheduler, OneTimeScheduler)
-    assert scheduler.start == arrow.get(
-        datetime.datetime(2021, 1, 1, tzinfo=UTC)
-    )
-    assert scheduler.end == arrow.get(
-        datetime.datetime(2021, 1, 1, 1, tzinfo=UTC)
-    )
+    assert scheduler.start == arrow.get(datetime(2021, 1, 1, tzinfo=UTC))
+    assert scheduler.end == arrow.get(datetime(2021, 1, 1, 1, tzinfo=UTC))
 
 
 def test_defer_noexpire(data: Data) -> None:
@@ -298,9 +293,7 @@ def test_defer_noexpire(data: Data) -> None:
     broadcast = md.to_broadcast()
     scheduler = broadcast.scheduler
     assert isinstance(scheduler, OpenEndedScheduler)
-    assert scheduler.start == arrow.get(
-        datetime.datetime(2021, 1, 1, tzinfo=UTC)
-    )
+    assert scheduler.start == arrow.get(datetime(2021, 1, 1, tzinfo=UTC))
 
 
 def test_expire(data: Data) -> None:
@@ -311,9 +304,7 @@ def test_expire(data: Data) -> None:
     broadcast = md.to_broadcast()
     scheduler = broadcast.scheduler
     assert isinstance(scheduler, FixedExpirationScheduler)
-    assert scheduler.end == arrow.get(
-        datetime.datetime(2021, 1, 2, tzinfo=UTC)
-    )
+    assert scheduler.end == arrow.get(datetime(2021, 1, 2, tzinfo=UTC))
 
 
 def test_patch_thursday(data: Data) -> None:

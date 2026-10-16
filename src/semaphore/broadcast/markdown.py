@@ -2,9 +2,9 @@
 front matter.
 """
 
-import datetime
 import enum
 from collections.abc import Mapping
+from datetime import date, datetime, time, tzinfo
 from typing import Annotated, Any, Literal, Self
 
 import arrow
@@ -48,7 +48,7 @@ See https://markdown-it-py.readthedocs.io/en/latest/using.html#the-parser
 """
 
 
-def convert_to_tzinfo(v: Any) -> datetime.tzinfo:
+def convert_to_tzinfo(v: Any) -> tzinfo:
     """Convert a value to a datetime.tzinfo.
 
     This function is intended to be used in a validator for Pydantic models
@@ -60,11 +60,11 @@ def convert_to_tzinfo(v: Any) -> datetime.tzinfo:
     v
         A value to convert into a timezone.
     """
-    if isinstance(v, datetime.tzinfo):
+    if isinstance(v, tzinfo):
         return v
     elif isinstance(v, str):
         tz = dateutil.tz.gettz(v)
-        if not isinstance(tz, datetime.tzinfo):
+        if not isinstance(tz, tzinfo):
             raise TypeError(f"Could not parse timezone from {v!s}")
         return tz
     else:
@@ -90,11 +90,11 @@ def convert_to_arrow(
     """
     if v is None:
         return None
-    if isinstance(v, datetime.date):
+    if isinstance(v, date):
         # Pydantic pre-parses YYYY-MM-DD into a datetime.date even if
         # we didn't declare the field as a datetime.date type
-        dt = datetime.datetime.combine(v, datetime.time())
-    elif isinstance(v, datetime.datetime):
+        dt = datetime.combine(v, time())
+    elif isinstance(v, datetime):
         # Pydantic pre-parses timestamps into datetime.datetime even if
         # we didn't declare the field as a datetime.datetime type
         # Pydantic pre-parses into a datetime
@@ -205,9 +205,9 @@ class RecurringRule(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    timezone: Annotated[
-        datetime.tzinfo | None, PlainValidator(convert_to_tzinfo)
-    ] = None
+    timezone: Annotated[tzinfo | None, PlainValidator(convert_to_tzinfo)] = (
+        None
+    )
     """Default timezone for any datetime fields that don't contain explicit
     datetimes.
     """
@@ -413,7 +413,7 @@ class RecurringRule(BaseModel):
             cache=False,
         )
 
-    def to_datetime(self) -> datetime.datetime:
+    def to_datetime(self) -> datetime:
         """Export to a `datetime.datetime`."""
         if self.date is None:
             raise RuntimeError(
@@ -442,9 +442,9 @@ class BroadcastMarkdownFrontMatter(BaseModel):
     is applicable to all environments.
     """
 
-    timezone: Annotated[
-        datetime.tzinfo | None, PlainValidator(convert_to_tzinfo)
-    ] = dateutil.tz.UTC
+    timezone: Annotated[tzinfo | None, PlainValidator(convert_to_tzinfo)] = (
+        dateutil.tz.UTC
+    )
     """Default timezone for any datetime fields that don't contain explicit
     datetimes.
 
