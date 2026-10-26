@@ -68,7 +68,7 @@ dev = [
     "uv",
 ]
 docs = [
-    "documenteer[guide]",
+    "documenteer[guide]==2.5.0b4",
     "scriv[toml]>=1.5",
 ]
 lint = [
