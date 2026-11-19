@@ -7,6 +7,14 @@ Find changes for the upcoming release in the project's [changelog.d directory](h
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-2.0.2'></a>
+## 2.0.2 (2026-11-19)
+
+### Other changes
+
+- Update pinned dependencies, including SQLAlchemy 2.1 and opentelemetry-api 1.45.2. The latter picks up the fix for a denial of service through quadratic-time `traceparent` parsing ([GHSA-mf5v-w3w3-f6cg](https://github.com/advisories/GHSA-mf5v-w3w3-f6cg)) proposed by Dependabot.
+- Update the Docker base image to Python 3.14.10.
+
 <a id='changelog-2.0.1'></a>
 ## 2.0.1 (2026-09-14)
 
