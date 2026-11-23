@@ -4,6 +4,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, Request, Response, status
+from gidgethub import BadRequest, ValidationFailure
 from gidgethub.sansio import Event
 from safir.dependencies.http_client import http_client_dependency
 from safir.dependencies.logger import logger_dependency
@@ -94,7 +95,28 @@ async def post_github_webhook(
         )
 
     webhook_secret = config.github_webhook_secret.get_secret_value()
-    event = Event.from_http(request.headers, body, secret=webhook_secret)
+    try:
+        event = Event.from_http(request.headers, body, secret=webhook_secret)
+    except ValidationFailure as e:
+        logger.warning(
+            "Rejected a GitHub webhook without a valid signature",
+            reason=str(e),
+        )
+        return Response(
+            "The webhook signature is missing or invalid",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+    except BadRequest as e:
+        # Event.from_http raises this if it can't decode the body, such as
+        # for an unsupported content type.
+        logger.warning(
+            "Rejected a GitHub webhook whose body could not be decoded",
+            reason=str(e),
+        )
+        return Response(
+            "The webhook body must be JSON or form-encoded JSON",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
 
     if event.event == "ping":
         return Response(status_code=status.HTTP_200_OK)
@@ -106,10 +128,13 @@ async def post_github_webhook(
     logger.debug("Received GitHub webhook", payload=event.data)
     try:
         installation_id = event.data["installation"]["id"]
-    except KeyError:
+    except KeyError, TypeError:
+        # TypeError is raised if installation is null or the body is not a
+        # JSON object.
+        logger.warning("Rejected a GitHub webhook without an installation ID")
         return Response(
             "Did not find installation.id in the webhook event payload",
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_400_BAD_REQUEST,
         )
     # Handlers create their own GitHub client, so that they can check the
     # event's repository against the source policy before calling GitHub.

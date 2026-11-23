@@ -1,6 +1,7 @@
 """Tests for the GitHub App webhook, ``/semaphore/github/webhook``."""
 
 import asyncio
+import json
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -24,6 +25,8 @@ from ..support.github import (
     make_message_id,
     make_push_payload,
     post_github_webhook,
+    post_github_webhook_body,
+    sign_webhook_body,
 )
 
 HELLO_MD = "---\nsummary: Hello from GitHub.\n---\n"
@@ -49,6 +52,9 @@ SHA_C = "cccc" + "0" * 36
 
 SECOND_REPO = "lsst-sqre/rsp_broadcast_extra"
 """A second repository that tests may add to the allowlist."""
+
+HELLO_PUSH = make_push_payload(added=["broadcasts/hello.md"])
+"""Payload of a push that adds a broadcast message file."""
 
 
 @pytest_asyncio.fixture
@@ -979,20 +985,122 @@ async def test_push_deleting_branch(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [
+        json.dumps(
+            {k: v for k, v in HELLO_PUSH.items() if k != "installation"}
+        ),
+        json.dumps({**HELLO_PUSH, "installation": None}),
+        json.dumps([HELLO_PUSH]),
+        "null",
+    ],
+    ids=["no-installation", "null-installation", "array-body", "null-body"],
+)
 async def test_push_without_installation(
-    github_app_client: AsyncClient, github_mock: GitHubMock
+    github_app_client: AsyncClient,
+    github_mock: GitHubMock,
+    caplog: pytest.LogCaptureFixture,
+    body: str,
 ) -> None:
-    payload = make_push_payload(added=["broadcasts/hello.md"])
-    del payload["installation"]
+    """A signed push whose body has no ``installation.id`` is rejected."""
+    response = await post_github_webhook_body(
+        github_app_client,
+        "push",
+        body.encode(),
+        signature=sign_webhook_body(body.encode()),
+    )
 
-    response = await post_github_webhook(github_app_client, "push", payload)
-
-    assert response.status_code == 500
+    assert response.status_code == 400
     assert response.text == (
         "Did not find installation.id in the webhook event payload"
     )
     assert await get_broadcasts(github_app_client) == []
     assert github_mock.get_requests() == []
+    warnings = get_warnings(caplog)
+    assert [w["event"] for w in warnings] == [
+        "Rejected a GitHub webhook without an installation ID"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ping(
+    github_app_client: AsyncClient, github_mock: GitHubMock
+) -> None:
+    payload = {"zen": "Keep it logically awesome.", "hook_id": 1}
+
+    response = await post_github_webhook(github_app_client, "ping", payload)
+
+    assert response.status_code == 200
+    assert github_mock.get_requests() == []
+
+
+@pytest.mark.asyncio
+async def test_webhook_without_signature(
+    github_app_client: AsyncClient,
+    github_mock: GitHubMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    body = json.dumps(make_push_payload(added=["broadcasts/hello.md"]))
+
+    response = await post_github_webhook_body(
+        github_app_client, "push", body.encode(), signature=None
+    )
+
+    assert response.status_code == 401
+    assert await get_broadcasts(github_app_client) == []
+    assert github_mock.get_requests() == []
+    warnings = get_warnings(caplog)
+    assert [w["event"] for w in warnings] == [
+        "Rejected a GitHub webhook without a valid signature"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_webhook_with_wrong_signature(
+    github_app_client: AsyncClient,
+    github_mock: GitHubMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    body = json.dumps(make_push_payload(added=["broadcasts/hello.md"]))
+    signature = sign_webhook_body(b"some other body")
+
+    response = await post_github_webhook_body(
+        github_app_client, "push", body.encode(), signature=signature
+    )
+
+    assert response.status_code == 401
+    assert await get_broadcasts(github_app_client) == []
+    assert github_mock.get_requests() == []
+    warnings = get_warnings(caplog)
+    assert [w["event"] for w in warnings] == [
+        "Rejected a GitHub webhook without a valid signature"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_webhook_with_unsupported_content_type(
+    github_app_client: AsyncClient,
+    github_mock: GitHubMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    body = json.dumps(make_push_payload(added=["broadcasts/hello.md"]))
+
+    response = await post_github_webhook_body(
+        github_app_client,
+        "push",
+        body.encode(),
+        signature=sign_webhook_body(body.encode()),
+        content_type="text/plain",
+    )
+
+    assert response.status_code == 400
+    assert await get_broadcasts(github_app_client) == []
+    assert github_mock.get_requests() == []
+    warnings = get_warnings(caplog)
+    assert [w["event"] for w in warnings] == [
+        "Rejected a GitHub webhook whose body could not be decoded"
+    ]
 
 
 @pytest.mark.asyncio

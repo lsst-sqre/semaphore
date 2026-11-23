@@ -44,6 +44,8 @@ __all__ = [
     "make_push_payload",
     "make_repository",
     "post_github_webhook",
+    "post_github_webhook_body",
+    "sign_webhook_body",
 ]
 
 GITHUB_API_URL = "https://api.github.com"
@@ -305,18 +307,74 @@ async def post_github_webhook(
         Semaphore's response.
     """
     body = json.dumps(payload).encode()
-    digest = hmac.new(
-        GITHUB_WEBHOOK_SECRET.encode(), body, hashlib.sha256
-    ).hexdigest()
+    return await post_github_webhook_body(
+        client, event, body, signature=sign_webhook_body(body)
+    )
+
+
+async def post_github_webhook_body(
+    client: httpx.AsyncClient,
+    event: str,
+    body: bytes,
+    *,
+    signature: str | None,
+    content_type: str = "application/json",
+) -> httpx.Response:
+    """Post a webhook request with a given body and signature to Semaphore.
+
+    Use this to post a request that GitHub would not send, such as one with
+    a missing or wrong signature.
+
+    Parameters
+    ----------
+    client
+        Client for the Semaphore app.
+    event
+        Name of the GitHub event, such as ``push``.
+    body
+        Body of the request.
+    signature
+        Value of the ``X-Hub-Signature-256`` header, or `None` to send no
+        signature. `sign_webhook_body` returns the signature that GitHub
+        would send.
+    content_type
+        Value of the ``Content-Type`` header.
+
+    Returns
+    -------
+    httpx.Response
+        Semaphore's response.
+    """
     headers = {
-        "Content-Type": "application/json",
+        "Content-Type": content_type,
         "X-GitHub-Event": event,
         "X-GitHub-Delivery": str(uuid4()),
-        "X-Hub-Signature-256": f"sha256={digest}",
     }
+    if signature is not None:
+        headers["X-Hub-Signature-256"] = signature
     return await client.post(
         "/semaphore/github/webhook", content=body, headers=headers
     )
+
+
+def sign_webhook_body(body: bytes) -> str:
+    """Sign a webhook request body as GitHub would sign it.
+
+    Parameters
+    ----------
+    body
+        Body of the request.
+
+    Returns
+    -------
+    str
+        Value of the ``X-Hub-Signature-256`` header for the body, signed with
+        the webhook secret that `configure_github_app` sets.
+    """
+    digest = hmac.new(
+        GITHUB_WEBHOOK_SECRET.encode(), body, hashlib.sha256
+    ).hexdigest()
+    return f"sha256={digest}"
 
 
 class HeldResponse:
