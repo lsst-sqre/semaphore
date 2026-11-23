@@ -48,6 +48,7 @@ See the `Phalanx documentation for Semaphore <https://phalanx.lsst.io/applicatio
    This variable is required to use the GitHub App.
    If the GitHub App credentials are set but this variable is unset or empty, the GitHub App is disabled and a warning is logged at startup.
    An entry that isn't of the form ``owner/repo`` is a configuration error.
+   See :ref:`github-app-allowlist` for more information.
 
 .. envvar:: SEMAPHORE_GITHUB_WEBHOOK_SECRET
 

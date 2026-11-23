@@ -14,9 +14,29 @@ To learn more about installing GitHub Apps in general, see the `GitHub Apps docu
     The GitHub App must be created in the GitHub organization or user that owns the source repository.
     For example, if the source repository is `lsst-sqre/rsp_broadcast`_, the GitHub App must be created in the ``lsst-sqre`` organization.
 
-    **Do not create a public GitHub App.**
-    If the GitHub App is public, it can be installed in any GitHub organization or user account.
-    Semaphore does not yet support an "accept" list to ensure that only authorized organizations or users can install a public GitHub App.
+.. _github-app-allowlist:
+
+Which repositories Semaphore accepts
+====================================
+
+Semaphore only reads broadcast messages from the GitHub repositories listed in the :envvar:`SEMAPHORE_GITHUB_REPOS` environment variable.
+Set it to the source repositories for the environment, as a comma-separated list of ``owner/repo`` names (for example, ``lsst-sqre/rsp_broadcast``).
+
+- A repository is accepted only if its name is in :envvar:`SEMAPHORE_GITHUB_REPOS`.
+  Names are matched case-insensitively and wildcards are not supported.
+- A fork is never used as a source, even if its name is in the list.
+- Only pushes to a repository's default branch publish broadcasts.
+  Pushes to other branches are ignored.
+
+Pushes from any other repository are acknowledged, ignored, and logged as a warning.
+When Semaphore starts, it likewise skips, with a warning, any repository that the GitHub App can see but that isn't accepted.
+
+:envvar:`SEMAPHORE_GITHUB_REPOS` is required to use the GitHub App.
+If the GitHub App credentials are set but :envvar:`SEMAPHORE_GITHUB_REPOS` is unset or empty, Semaphore disables the GitHub App and logs a warning at startup.
+While the GitHub App is disabled, the webhook endpoint returns ``501 Not Implemented`` and Semaphore loads no broadcasts from GitHub.
+
+The allowlist is Semaphore's own check on where broadcasts come from.
+The GitHub settings recommended on this page (a private app, installed on selected repositories, with a protected default branch) add further layers of defense around it.
 
 Create an app with a template URL
 =================================
@@ -89,6 +109,19 @@ The GitHub App needs to subscribe to the following events:
 - Check Run
 - Push
 
+Where can this GitHub App be installed?
+---------------------------------------
+
+Select :guilabel:`Only on this account`.
+The template URL selects this option for you.
+
+.. warning::
+
+    **Do not make the GitHub App public.**
+    A public GitHub App (:guilabel:`Any account`) can be installed in any GitHub organization or user account, which could then send events to Semaphore.
+    Semaphore ignores broadcasts from repositories that aren't in :envvar:`SEMAPHORE_GITHUB_REPOS`, so the allowlist already rejects them.
+    Keeping the app private is defense in depth: it stops other accounts from installing the app at all, so a mistake in the allowlist can't be exploited by an outside account.
+
 .. _github-app-secrets:
 
 Create the app and secrets
@@ -109,5 +142,20 @@ Install the app in the source repository
 ========================================
 
 Once the app is created and the Semaphore app is configured, you need to *install* the app in the source repository (or repositories, if there are several).
-From the app's GitHub settings page, click :guilabel:`Install App` and select the repositories to install it in.
-Avoid installing the app in repositories that do not use Semaphore.
+From the app's GitHub settings page, click :guilabel:`Install App`, choose the organization or user account, and select :guilabel:`Only select repositories`.
+Then pick the source repositories.
+
+Install the app on selected repositories only.
+Don't choose :guilabel:`All repositories`: Semaphore would skip the extra repositories anyway, but the app's credentials would still be able to read them, and each new repository in the account would be added automatically.
+
+Every repository you install the app on should also be listed in :envvar:`SEMAPHORE_GITHUB_REPOS` (see :ref:`github-app-allowlist`).
+A repository that the app is installed on but that isn't in the list is skipped with a warning.
+
+Protect the source repository's default branch
+==============================================
+
+Semaphore publishes a broadcast as soon as the change reaches the source repository's default branch.
+Merging a pull request into the default branch is therefore the same as publishing its broadcasts to the RSP environments they target.
+
+Protect the default branch with a branch protection rule or ruleset that requires an approving pull request review before merging, and that blocks direct pushes and force pushes.
+That way, at least one other person reviews each broadcast before it's published.
