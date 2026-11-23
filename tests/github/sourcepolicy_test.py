@@ -91,6 +91,24 @@ def test_missing_full_name() -> None:
     assert decision.reason == SourceRejectionReason.not_in_allowlist
 
 
+def test_allows_owner_of_allowed_repo() -> None:
+    policy = BroadcastSourcePolicy(["lsst-sqre/rsp_broadcast"])
+
+    assert policy.allows_owner("lsst-sqre")
+
+
+def test_does_not_allow_other_owner() -> None:
+    policy = BroadcastSourcePolicy(["lsst-sqre/rsp_broadcast"])
+
+    assert not policy.allows_owner("someone")
+
+
+def test_allows_owner_case_insensitively() -> None:
+    policy = BroadcastSourcePolicy(["LSST-SQRE/RSP_Broadcast"])
+
+    assert policy.allows_owner("Lsst-Sqre")
+
+
 def test_allowed_repos_as_configured() -> None:
     policy = BroadcastSourcePolicy(
         repo for repo in ["LSST-SQRE/RSP_Broadcast", "lsst-sqre/other"]

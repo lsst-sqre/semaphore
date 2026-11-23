@@ -39,6 +39,7 @@ __all__ = [
     "HeldResponse",
     "configure_github_app",
     "get_installation_token",
+    "make_installation",
     "make_message_id",
     "make_push_payload",
     "make_repository",
@@ -118,6 +119,42 @@ def configure_github_app(
 def get_installation_token(installation_id: int) -> str:
     """Return the access token `GitHubMock` issues to an installation."""
     return f"ghs_test-installation-{installation_id}"
+
+
+def make_installation(
+    installation_id: int = GITHUB_INSTALLATION_ID,
+    *,
+    account: str = GITHUB_REPO.split("/", maxsplit=1)[0],
+    suspended: bool = False,
+) -> dict[str, Any]:
+    """Make a GitHub App installation resource, as listed by the REST API.
+
+    Only the fields Semaphore reads, plus a few for realism, are included.
+
+    Parameters
+    ----------
+    installation_id
+        ID of the installation.
+    account
+        Login of the user or organization the app is installed on. By
+        default, the owner of `GITHUB_REPO`.
+    suspended
+        Whether the installation is suspended.
+
+    Returns
+    -------
+    dict
+        The installation resource.
+    """
+    return {
+        "id": installation_id,
+        "account": {"login": account, "type": "Organization"},
+        "app_id": int(GITHUB_APP_ID),
+        "target_type": "Organization",
+        "repository_selection": "selected",
+        "suspended_at": "2026-01-01T00:00:00Z" if suspended else None,
+        "suspended_by": {"login": "admin"} if suspended else None,
+    }
 
 
 def make_message_id(
@@ -326,20 +363,21 @@ class GitHubMock:
     def __init__(self, httpx_mock: HTTPXMock) -> None:
         self._httpx_mock = httpx_mock
 
-    def mock_installations(self, installation_ids: Iterable[int]) -> None:
+    def mock_installations(
+        self, installations: Iterable[dict[str, Any]]
+    ) -> None:
         """Mock one request for the list of installations of the app.
 
         Parameters
         ----------
-        installation_ids
-            IDs of the installations, in the order GitHub lists them.
+        installations
+            Installation resources, such as from `make_installation`, in the
+            order GitHub lists them.
         """
         self._httpx_mock.add_response(
             method="GET",
             url=f"{GITHUB_API_URL}/app/installations",
-            json=[
-                {"id": installation_id} for installation_id in installation_ids
-            ],
+            json=list(installations),
         )
 
     def mock_installation_token(
@@ -348,7 +386,9 @@ class GitHubMock:
         """Mock creating access tokens for an installation of the app.
 
         Any number of tokens may be created, but at least one must be. The
-        token is `get_installation_token` of the installation.
+        token is `get_installation_token` of the installation. To fail the
+        first requests, mock them with `mock_installation_token_error` before
+        calling this.
         """
         self._httpx_mock.add_response(
             method="POST",
@@ -363,6 +403,40 @@ class GitHubMock:
             },
             is_reusable=True,
         )
+
+    def mock_installation_token_error(
+        self,
+        installation_id: int = GITHUB_INSTALLATION_ID,
+        *,
+        status_code: int,
+        times: int = 1,
+    ) -> None:
+        """Mock requests to create an access token for an installation of the
+        app that GitHub fails.
+
+        Each of the next ``times`` requests fails, and each must be made.
+        Mock the token afterwards with `mock_installation_token` to create
+        tokens for the requests after those, as when GitHub recovers.
+
+        Parameters
+        ----------
+        installation_id
+            ID of the installation.
+        status_code
+            HTTP status code of GitHub's error response.
+        times
+            Number of requests that fail.
+        """
+        for _ in range(times):
+            self._httpx_mock.add_response(
+                method="POST",
+                url=(
+                    f"{GITHUB_API_URL}/app/installations/{installation_id}"
+                    "/access_tokens"
+                ),
+                status_code=status_code,
+                json={"message": "GitHub error"},
+            )
 
     def mock_installation_repositories(
         self,
@@ -413,6 +487,41 @@ class GitHubMock:
                     "total_count": len(repositories),
                     "repositories": page,
                 },
+            )
+
+    def mock_installation_repositories_error(
+        self,
+        installation_id: int = GITHUB_INSTALLATION_ID,
+        *,
+        status_code: int,
+        times: int = 1,
+    ) -> None:
+        """Mock requests for the repositories an installation can access
+        that GitHub fails.
+
+        Each of the next ``times`` requests for the first page of the
+        listing, by a client authenticated with the installation's token,
+        fails, and each must be made. Mock the listing afterwards with
+        `mock_installation_repositories` to serve it to the request after
+        those.
+
+        Parameters
+        ----------
+        installation_id
+            ID of the installation.
+        status_code
+            HTTP status code of GitHub's error response.
+        times
+            Number of requests that fail.
+        """
+        token = get_installation_token(installation_id)
+        for _ in range(times):
+            self._httpx_mock.add_response(
+                method="GET",
+                url=f"{GITHUB_API_URL}/installation/repositories",
+                match_headers={"authorization": f"token {token}"},
+                status_code=status_code,
+                json={"message": "GitHub error"},
             )
 
     def mock_branch_head(

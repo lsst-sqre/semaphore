@@ -46,18 +46,38 @@ Loading broadcasts at startup
 When Semaphore starts, it loads the broadcasts in the ``broadcasts`` directory of each accepted repository's default branch.
 Later changes arrive through push webhooks.
 
+- An installation of the GitHub App that is suspended is skipped with a warning.
+  So is an installation on an account that owns none of the repositories in :envvar:`SEMAPHORE_GITHUB_REPOS`.
+  Semaphore doesn't request an access token for a skipped installation.
 - A malformed broadcast file is skipped with a warning, and the other broadcasts are still loaded.
   Fix the file and push the fix to publish it.
 - A repository with no ``broadcasts`` directory has no broadcasts.
   Git doesn't store empty directories, so a repository whose broadcasts have all been deleted looks like this.
-- If GitHub fails or can't be reached while Semaphore loads a repository (for example, with a server error, a timeout, an exceeded rate limit, or an authentication error), Semaphore logs a warning and still starts.
-  It then retries loading that repository in the background, waiting longer after each failed attempt (up to five minutes), until it succeeds.
-  The repository's broadcasts are served as soon as it loads, without restarting Semaphore.
+- If GitHub fails or can't be reached while Semaphore loads a repository, or while it authorizes an installation of the GitHub App or lists the installation's repositories (for example, with a server error, a timeout, an exceeded rate limit, or an authentication error), Semaphore logs a warning and still starts.
+  The other installations and repositories are still loaded.
+  Semaphore then retries loading that repository, or that installation's repositories, in the background, waiting longer after each failed attempt (up to five minutes), until it succeeds.
+  The broadcasts are served as soon as they load, without restarting Semaphore.
   Each Semaphore replica loads and retries on its own, so replicas may briefly serve different broadcasts while GitHub recovers.
 
 After loading, Semaphore logs a ``Loaded broadcasts from GitHub`` summary.
-Its ``failed_repo_count`` field is the number of repositories that are being retried, and ``skipped_file_count`` is the number of skipped files.
-Each retry logs ``Retrying loading broadcasts from a repository``, and a repository that loads after retrying logs ``Loaded broadcasts from a repository after retrying``.
+Its ``failed_installation_count`` and ``failed_repo_count`` fields are the numbers of installations and repositories that are being retried, and ``skipped_file_count`` is the number of skipped files.
+Each retry of a repository logs ``Retrying loading broadcasts from a repository``, and a repository that loads after retrying logs ``Loaded broadcasts from a repository after retrying``.
+Likewise, each retry of an installation logs ``Retrying loading broadcasts from a GitHub App installation``, and an installation that loads after retrying logs ``Loaded broadcasts from a GitHub App installation after retrying``.
+
+.. _github-app-unseen-repos:
+
+Troubleshooting a repository that isn't loaded
+----------------------------------------------
+
+If no installation of the GitHub App can see a repository in :envvar:`SEMAPHORE_GITHUB_REPOS`, Semaphore logs a ``No GitHub App installation can see these allowed repositories`` warning at startup.
+Its ``github_repos`` field lists those repositories.
+For each one, check that:
+
+- The name in :envvar:`SEMAPHORE_GITHUB_REPOS` is spelled correctly.
+- The GitHub App is installed on the repository (see :ref:`github-app-install`).
+- The installation isn't suspended. Semaphore logs a ``Skipping a suspended GitHub App installation`` warning for a suspended installation.
+
+The warning leaves out the repositories of an account whose installation is being retried, because Semaphore doesn't yet know which repositories that installation can see.
 
 Create an app with a template URL
 =================================
@@ -159,6 +179,8 @@ These are provided to Semaphore as environment variables:
 
 See :doc:`environment-variables` for more information on Phalanx's environment variable settings.
 
+.. _github-app-install:
+
 Install the app in the source repository
 ========================================
 
@@ -171,6 +193,7 @@ Don't choose :guilabel:`All repositories`: Semaphore would skip the extra reposi
 
 Every repository you install the app on should also be listed in :envvar:`SEMAPHORE_GITHUB_REPOS` (see :ref:`github-app-allowlist`).
 A repository that the app is installed on but that isn't in the list is skipped with a warning.
+Conversely, a repository in the list that the app isn't installed on is reported with a warning at startup (see :ref:`github-app-unseen-repos`).
 
 Protect the source repository's default branch
 ==============================================

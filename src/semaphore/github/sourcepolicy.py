@@ -57,6 +57,9 @@ class BroadcastSourcePolicy:
         self._allowed_repos = frozenset(
             name.lower() for name in self._configured_repos
         )
+        self._allowed_owners = frozenset(
+            name.split("/", maxsplit=1)[0] for name in self._allowed_repos
+        )
 
     @classmethod
     def from_config(cls, config: Config) -> Self:
@@ -79,6 +82,27 @@ class BroadcastSourcePolicy:
     def allowed_repos(self) -> list[str]:
         """Full names of the allowed repositories, as configured."""
         return list(self._configured_repos)
+
+    def allows_owner(self, owner: str) -> bool:
+        """Determine whether an account owns any of the allowed repositories.
+
+        Only an account that owns an allowed repository can be the source of
+        broadcast messages, so the GitHub App's installations on other
+        accounts need not be read.
+
+        Parameters
+        ----------
+        owner
+            Login of a GitHub user or organization, such as the
+            ``account.login`` of a GitHub App installation. It is compared
+            case-insensitively.
+
+        Returns
+        -------
+        bool
+            Whether ``owner`` is the owner of any allowed repository.
+        """
+        return owner.lower() in self._allowed_owners
 
     def evaluate(self, repository: Mapping[str, Any]) -> SourceDecision:
         """Decide whether a repository may publish broadcast messages.

@@ -2,7 +2,8 @@
 
 import asyncio
 import dataclasses
-from collections.abc import AsyncGenerator, Iterator, Sequence
+from collections.abc import AsyncGenerator, Iterable, Iterator, Sequence
+from contextlib import AbstractAsyncContextManager, nullcontext
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Literal, Self
@@ -31,15 +32,15 @@ message files.
 """
 
 BOOTSTRAP_RETRY_INITIAL_DELAY = 10.0
-"""Seconds to wait before the first attempt to load again the repositories
-that failed at startup (see `retry_failed_repos`). The wait doubles after
-each attempt in which a repository fails, up to
+"""Seconds to wait before the first attempt to load again the installations
+and repositories that failed at startup (see `retry_bootstrap_failures`).
+The wait doubles after each attempt in which something fails, up to
 `BOOTSTRAP_RETRY_MAX_DELAY`.
 """
 
 BOOTSTRAP_RETRY_MAX_DELAY = 300.0
-"""Most seconds to wait between attempts to load again the repositories that
-failed at startup.
+"""Most seconds to wait between attempts to load again the installations and
+repositories that failed at startup.
 """
 
 _ID_PREFIX = "github.com/"
@@ -678,29 +679,61 @@ class FailedRepo:
         return self.github_repo["full_name"]
 
 
+@dataclasses.dataclass(frozen=True)
+class FailedInstallation:
+    """A GitHub App installation that GitHub failed to authorize, or whose
+    repositories GitHub failed to list, which must be loaded again.
+    """
+
+    installation_id: str
+    """ID of the GitHub App installation."""
+
+    account: str
+    """Login of the user or organization that the installation is on."""
+
+
+type BootstrapFailure = FailedRepo | FailedInstallation
+"""What GitHub failed to return when broadcasts were loaded at startup, which
+`retry_bootstrap_failures` loads again.
+"""
+
+
 async def bootstrap_broadcast_repo(
     *,
     http_client: httpx.AsyncClient,
     broadcast_repo: BroadcastMessageRepository,
     source_policy: BroadcastSourcePolicy,
     logger: BoundLogger,
-) -> list[FailedRepo]:
+) -> list[BootstrapFailure]:
     """Bootstrap data in the broadcast repo from GitHub repositories that the
     GitHub app has access to.
 
     Semaphore is a GitHub App that can be installed in specific repositories.
-    Of the repositories that its installations can see, only those that
-    ``source_policy`` allows are loaded; the others are skipped with a
-    warning, before any of their contents are requested.
+    An installation that is suspended, or that is on an account that owns no
+    repository that ``source_policy`` allows, is skipped with a warning,
+    before a token is requested for it. Of the repositories that the other
+    installations can see, only those that ``source_policy`` allows are
+    loaded; the others are skipped with a warning, before any of their
+    contents are requested (see `_load_installation`).
 
-    Neither content nor GitHub errors in an allowed repository stop startup
-    (see `_load_repo_broadcasts`). A broadcast file that is malformed is
-    skipped with a warning. A repository without a broadcasts directory has
-    no broadcasts. A repository that GitHub fails to list, or one of whose
-    files GitHub fails to return, is logged with a warning and returned, so
-    that it can be loaded again with `retry_failed_repos`; the messages of
-    its other files are kept. A summary of what was loaded is logged at the
-    end.
+    Neither content nor GitHub errors stop startup:
+
+    - If GitHub fails to authorize an installation or to list its
+      repositories, the installation is logged with a warning and returned,
+      so that it can be loaded again with `retry_bootstrap_failures`. The
+      other installations are still loaded.
+    - In an allowed repository (see `_load_repo_broadcasts`), a broadcast
+      file that is malformed is skipped with a warning, and a repository
+      without a broadcasts directory has no broadcasts. A repository that
+      GitHub fails to list, or one of whose files GitHub fails to return, is
+      logged with a warning and returned, to be loaded again; the messages
+      of its other files are kept.
+
+    At the end, a summary of what was loaded is logged. Then a warning lists
+    the allowed repositories that no installation can see, as when a name is
+    misspelled or the app is not installed on the repository. The
+    repositories of the accounts whose installations are returned are left
+    out of it, since what those installations can see is not known yet.
 
     Parameters
     ----------
@@ -715,108 +748,347 @@ async def bootstrap_broadcast_repo(
 
     Returns
     -------
-    list of FailedRepo
-        The repositories that GitHub failed to return, in the order they were
-        loaded. Empty if every allowed repository was loaded.
+    list of BootstrapFailure
+        The installations, and then the repositories, that GitHub failed to
+        return, each in the order they were loaded. Empty if everything was
+        loaded.
     """
     github_client = create_github_client(http_client=http_client)
     jwt = get_app_jwt()
+    seen_repos: list[str] = []
     repo_count = 0
     message_count = 0
     skipped_file_count = 0
+    failed_installations: list[FailedInstallation] = []
     failed_repos: list[FailedRepo] = []
     async for installation in iter_installations(
         github_client=github_client, jwt=jwt
     ):
-        installation_client = await create_github_installation_client(
-            http_client=http_client, installation_id=installation["id"]
+        installation_id = str(installation["id"])
+        account = _get_installation_account(installation)
+        installation_logger = logger.bind(
+            installation_id=installation_id, github_account=account
         )
-        async for github_repo in iter_installation_repositories(
-            github_client=installation_client
-        ):
-            decision = source_policy.evaluate(github_repo)
-            if not decision.allowed:
-                logger.warning(
-                    "Skipping a repository that may not publish broadcasts",
-                    github_repo=github_repo.get("full_name"),
-                    reason=decision.reason,
-                )
-                continue
-            result = await _load_repo_broadcasts(
-                github_repo=github_repo,
-                broadcast_repo=broadcast_repo,
-                github_client=installation_client,
-                logger=logger,
+        if installation.get("suspended_at"):
+            installation_logger.warning(
+                "Skipping a suspended GitHub App installation",
+                suspended_at=installation["suspended_at"],
             )
-            message_count += result.message_count
-            skipped_file_count += result.skipped_file_count
-            if result.failed:
-                failed_repos.append(
-                    FailedRepo(
-                        installation_id=str(installation["id"]),
-                        github_repo=github_repo,
-                    )
+            continue
+        if account is None or not source_policy.allows_owner(account):
+            installation_logger.warning(
+                "Skipping a GitHub App installation on an account that owns "
+                "no allowed repository"
+            )
+            continue
+        try:
+            result = await _load_installation(
+                installation_id=installation_id,
+                http_client=http_client,
+                broadcast_repo=broadcast_repo,
+                source_policy=source_policy,
+                repo_locks=None,
+                logger=installation_logger,
+            )
+        except Exception:
+            installation_logger.warning(
+                "Could not authorize a GitHub App installation or list its "
+                "repositories, will retry",
+                exc_info=True,
+            )
+            failed_installations.append(
+                FailedInstallation(
+                    installation_id=installation_id, account=account
                 )
-            else:
-                repo_count += 1
+            )
+            continue
+        seen_repos.extend(result.seen_repos)
+        repo_count += result.repo_count
+        message_count += result.message_count
+        skipped_file_count += result.skipped_file_count
+        failed_repos.extend(result.failed_repos)
 
     logger.info(
         "Loaded broadcasts from GitHub",
         github_repos=source_policy.allowed_repos,
         repo_count=repo_count,
+        failed_installation_count=len(failed_installations),
         failed_repo_count=len(failed_repos),
         message_count=message_count,
         skipped_file_count=skipped_file_count,
     )
-    return failed_repos
+    unseen_repos = _get_unseen_repos(
+        source_policy=source_policy,
+        seen_repos=seen_repos,
+        unknown_accounts=[f.account for f in failed_installations],
+    )
+    if unseen_repos:
+        logger.warning(
+            "No GitHub App installation can see these allowed repositories",
+            github_repos=unseen_repos,
+        )
+    return [*failed_installations, *failed_repos]
 
 
-async def retry_failed_repos(
+def _get_installation_account(installation: dict[str, Any]) -> str | None:
+    """Get the login of the account that a GitHub App installation is on.
+
+    Parameters
+    ----------
+    installation
+        The installation resource from the GitHub v3 API.
+
+    Returns
+    -------
+    str or None
+        The ``account.login`` of the installation, or `None` if the
+        installation has no account with a login.
+    """
+    account = installation.get("account")
+    if not isinstance(account, dict):
+        return None
+    login = account.get("login")
+    return login if isinstance(login, str) else None
+
+
+def _get_unseen_repos(
     *,
-    failed_repos: Sequence[FailedRepo],
+    source_policy: BroadcastSourcePolicy,
+    seen_repos: Iterable[str],
+    unknown_accounts: Iterable[str],
+) -> list[str]:
+    """Get the allowed repositories that no GitHub App installation can see.
+
+    Parameters
+    ----------
+    source_policy
+        The policy for which repositories may publish broadcast messages.
+    seen_repos
+        Full names (``owner/repo``) of the repositories that the
+        installations can see, allowed or not.
+    unknown_accounts
+        Logins of the accounts whose installations' repositories are not
+        known, because GitHub failed to list them. Their allowed repositories
+        are left out.
+
+    Returns
+    -------
+    list of str
+        Full names of the allowed repositories, as configured, that are not
+        in ``seen_repos`` and are not owned by an account in
+        ``unknown_accounts``. Names are compared case-insensitively.
+    """
+    seen = {name.lower() for name in seen_repos}
+    unknown = {account.lower() for account in unknown_accounts}
+    return [
+        name
+        for name in source_policy.allowed_repos
+        if name.lower() not in seen
+        and name.split("/", maxsplit=1)[0].lower() not in unknown
+    ]
+
+
+@dataclasses.dataclass
+class _InstallationLoadResult:
+    """The outcome of loading the broadcast messages in the repositories of
+    one GitHub App installation.
+    """
+
+    seen_repos: list[str] = dataclasses.field(default_factory=list)
+    """Full names of the repositories that the installation can see, allowed
+    or not.
+    """
+
+    repo_count: int = 0
+    """Number of allowed repositories that loaded, including those without
+    broadcasts.
+    """
+
+    message_count: int = 0
+    """Number of messages added to the broadcast message repository."""
+
+    skipped_file_count: int = 0
+    """Number of broadcast message files skipped because they could not be
+    loaded.
+    """
+
+    failed_repos: list[FailedRepo] = dataclasses.field(default_factory=list)
+    """The allowed repositories that GitHub failed to return, which must be
+    loaded again.
+    """
+
+
+async def _load_installation(
+    *,
+    installation_id: str,
     http_client: httpx.AsyncClient,
     broadcast_repo: BroadcastMessageRepository,
+    source_policy: BroadcastSourcePolicy,
+    repo_locks: RepoLocks | None,
+    logger: BoundLogger,
+) -> _InstallationLoadResult:
+    """Load the broadcast messages in the allowed repositories that a GitHub
+    App installation can see.
+
+    The installation's repositories are listed in full with a new client
+    authorized as the installation. A repository that ``source_policy``
+    rejects is skipped with a warning. Each allowed repository is then
+    loaded (see `_load_repo_broadcasts`).
+
+    Parameters
+    ----------
+    installation_id
+        ID of the GitHub App installation.
+    http_client
+        The httpx client.
+    broadcast_repo
+        The broadcast message repository.
+    source_policy
+        The policy for which repositories may publish broadcast messages.
+    repo_locks
+        The per-repository locks of broadcast sources, to load each
+        repository under its lock so that loading it does not interleave
+        with a push to it. `None` to load without locks, as at startup,
+        before any push is processed.
+    logger
+        The logger instance.
+
+    Returns
+    -------
+    _InstallationLoadResult
+        What was loaded from the installation's repositories, and which of
+        them failed.
+
+    Raises
+    ------
+    Exception
+        Raised if the installation cannot be authorized or its repositories
+        cannot be listed, as when GitHub fails or cannot be reached. None of
+        the installation's repositories has been loaded then.
+    """
+    # A new client each time, since an installation's token expires after an
+    # hour.
+    github_client = await create_github_installation_client(
+        http_client=http_client, installation_id=installation_id
+    )
+    # Listed in full before any repository is loaded, so that a failure on a
+    # later page of the listing fails the installation before any of its
+    # repositories is loaded.
+    github_repos = [
+        github_repo
+        async for github_repo in iter_installation_repositories(
+            github_client=github_client
+        )
+    ]
+    result = _InstallationLoadResult()
+    for github_repo in github_repos:
+        full_name = github_repo.get("full_name")
+        if isinstance(full_name, str):
+            result.seen_repos.append(full_name)
+        decision = source_policy.evaluate(github_repo)
+        if not decision.allowed:
+            logger.warning(
+                "Skipping a repository that may not publish broadcasts",
+                github_repo=full_name,
+                reason=decision.reason,
+            )
+            continue
+        repo_lock: AbstractAsyncContextManager[object] = (
+            nullcontext()
+            if repo_locks is None
+            else repo_locks.get(github_repo["full_name"])
+        )
+        async with repo_lock:
+            repo_result = await _load_repo_broadcasts(
+                github_repo=github_repo,
+                broadcast_repo=broadcast_repo,
+                github_client=github_client,
+                logger=logger,
+            )
+        result.message_count += repo_result.message_count
+        result.skipped_file_count += repo_result.skipped_file_count
+        if repo_result.failed:
+            result.failed_repos.append(
+                FailedRepo(
+                    installation_id=installation_id, github_repo=github_repo
+                )
+            )
+        else:
+            result.repo_count += 1
+    return result
+
+
+async def retry_bootstrap_failures(
+    *,
+    failures: Sequence[BootstrapFailure],
+    http_client: httpx.AsyncClient,
+    broadcast_repo: BroadcastMessageRepository,
+    source_policy: BroadcastSourcePolicy,
     repo_locks: RepoLocks,
     logger: BoundLogger,
 ) -> None:
-    """Load again the repositories that GitHub failed to return at startup,
-    until each one loads.
+    """Load again the installations and repositories that GitHub failed to
+    return at startup, until each one loads.
 
     This is meant to run as a background task, so that startup does not
     wait for GitHub to recover. Each attempt waits first, for
     `BOOTSTRAP_RETRY_INITIAL_DELAY` seconds and then twice as long after
     each attempt, up to `BOOTSTRAP_RETRY_MAX_DELAY`. Then it loads each
-    repository that is still failed in full, as at startup (see
-    `_load_repo_broadcasts`), with a new client authorized as the
-    repository's installation and under the repository's lock, so that it
-    does not interleave with a push to the repository. A repository that
-    fails again, including because its installation cannot be authorized,
-    is tried again in the next attempt. The function returns once every
-    repository has loaded.
+    failure that is still pending, with a new client authorized as its
+    installation, and each repository under the repository's lock, so that
+    it does not interleave with a push to the repository:
+
+    - A failed installation is loaded as at startup (see
+      `_load_installation`): its repositories are listed and those that
+      ``source_policy`` allows are loaded. If GitHub fails again to
+      authorize it or to list its repositories, it is tried again in the
+      next attempt. A repository of it that GitHub fails to return is tried
+      again in the next attempt, as a failed repository.
+    - A failed repository is loaded in full, as at startup (see
+      `_load_repo_broadcasts`). If it fails again, including because its
+      installation cannot be authorized, it is tried again in the next
+      attempt.
+
+    The function returns once everything has loaded.
 
     Parameters
     ----------
-    failed_repos
-        The repositories to load, as returned by `bootstrap_broadcast_repo`.
+    failures
+        What to load, as returned by `bootstrap_broadcast_repo`.
     http_client
         The httpx client.
     broadcast_repo
         The broadcast message repository.
+    source_policy
+        The policy for which repositories may publish broadcast messages.
     repo_locks
         The per-repository locks of broadcast sources.
     logger
         The logger instance.
     """
-    pending = list(failed_repos)
+    pending = list(failures)
     delays = _iter_retry_delays()
     attempt = 0
     while pending:
         await asyncio.sleep(next(delays))
         attempt += 1
-        still_failed = []
-        for failed_repo in pending:
+        still_failed: list[BootstrapFailure] = []
+        for failure in pending:
+            if isinstance(failure, FailedInstallation):
+                still_failed.extend(
+                    await _retry_installation(
+                        failed_installation=failure,
+                        attempt=attempt,
+                        http_client=http_client,
+                        broadcast_repo=broadcast_repo,
+                        source_policy=source_policy,
+                        repo_locks=repo_locks,
+                        logger=logger,
+                    )
+                )
+                continue
             loaded = await _retry_repo(
-                failed_repo=failed_repo,
+                failed_repo=failure,
                 attempt=attempt,
                 http_client=http_client,
                 broadcast_repo=broadcast_repo,
@@ -824,18 +1096,86 @@ async def retry_failed_repos(
                 logger=logger,
             )
             if not loaded:
-                still_failed.append(failed_repo)
+                still_failed.append(failure)
         pending = still_failed
 
 
 def _iter_retry_delays() -> Iterator[float]:
     """Iterate over the seconds to wait before each attempt of
-    `retry_failed_repos`: an exponential backoff that is capped.
+    `retry_bootstrap_failures`: an exponential backoff that is capped.
     """
     delay = BOOTSTRAP_RETRY_INITIAL_DELAY
     while True:
         yield delay
         delay = min(delay * 2, BOOTSTRAP_RETRY_MAX_DELAY)
+
+
+async def _retry_installation(
+    *,
+    failed_installation: FailedInstallation,
+    attempt: int,
+    http_client: httpx.AsyncClient,
+    broadcast_repo: BroadcastMessageRepository,
+    source_policy: BroadcastSourcePolicy,
+    repo_locks: RepoLocks,
+    logger: BoundLogger,
+) -> list[BootstrapFailure]:
+    """Try once to load a GitHub App installation that GitHub failed to
+    authorize, or whose repositories GitHub failed to list.
+
+    Parameters
+    ----------
+    failed_installation
+        The installation to load.
+    attempt
+        Number of the attempt of `retry_bootstrap_failures`, starting at 1.
+    http_client
+        The httpx client.
+    broadcast_repo
+        The broadcast message repository.
+    source_policy
+        The policy for which repositories may publish broadcast messages.
+    repo_locks
+        The per-repository locks of broadcast sources.
+    logger
+        The logger instance.
+
+    Returns
+    -------
+    list of BootstrapFailure
+        What is still to be loaded: the installation, if it failed again, or
+        else its repositories that GitHub failed to return.
+    """
+    logger = logger.bind(
+        installation_id=failed_installation.installation_id,
+        github_account=failed_installation.account,
+        attempt=attempt,
+    )
+    logger.info("Retrying loading broadcasts from a GitHub App installation")
+    try:
+        result = await _load_installation(
+            installation_id=failed_installation.installation_id,
+            http_client=http_client,
+            broadcast_repo=broadcast_repo,
+            source_policy=source_policy,
+            repo_locks=repo_locks,
+            logger=logger,
+        )
+    except Exception:
+        logger.warning(
+            "Could not authorize a GitHub App installation or list its "
+            "repositories, will retry",
+            exc_info=True,
+        )
+        return [failed_installation]
+    logger.info(
+        "Loaded broadcasts from a GitHub App installation after retrying",
+        repo_count=result.repo_count,
+        failed_repo_count=len(result.failed_repos),
+        message_count=result.message_count,
+        skipped_file_count=result.skipped_file_count,
+    )
+    return list(result.failed_repos)
 
 
 async def _retry_repo(
@@ -854,7 +1194,7 @@ async def _retry_repo(
     failed_repo
         The repository to load.
     attempt
-        Number of the attempt of `retry_failed_repos`, starting at 1.
+        Number of the attempt of `retry_bootstrap_failures`, starting at 1.
     http_client
         The httpx client.
     broadcast_repo

@@ -25,7 +25,7 @@ from .dependencies.broadcastrepo import broadcast_repo_dependency
 from .dependencies.repolocks import repo_locks_dependency
 from .github.broadcastservices import (
     bootstrap_broadcast_repo,
-    retry_failed_repos,
+    retry_bootstrap_failures,
 )
 from .github.sourcepolicy import BroadcastSourcePolicy
 from .handlers.external import external_router
@@ -69,27 +69,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
     if config.enable_github_app:
         http_client = await http_client_dependency()
-        failed_repos = await bootstrap_broadcast_repo(
+        source_policy = BroadcastSourcePolicy.from_config(config)
+        failures = await bootstrap_broadcast_repo(
             http_client=http_client,
             broadcast_repo=broadcast_repo,
-            source_policy=BroadcastSourcePolicy.from_config(config),
+            source_policy=source_policy,
             logger=logger,
         )
-        if failed_repos:
+        if failures:
             # Startup does not wait for GitHub to recover. Each process
             # retries for its own broadcast repository.
             retry_task = asyncio.create_task(
-                retry_failed_repos(
-                    failed_repos=failed_repos,
+                retry_bootstrap_failures(
+                    failures=failures,
                     http_client=http_client,
                     broadcast_repo=broadcast_repo,
+                    source_policy=source_policy,
                     repo_locks=await repo_locks_dependency(),
                     logger=logger,
                 ),
                 name="github-bootstrap-retry",
             )
-    # The task retrying the repositories that failed at startup, if any, is
-    # kept on the app's state so that it can be inspected (as by tests).
+    # The task retrying the installations and repositories that failed at
+    # startup, if any, is kept on the app's state so that it can be
+    # inspected (as by tests).
     app.state.github_retry_task = retry_task
 
     yield
