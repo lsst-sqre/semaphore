@@ -1,8 +1,9 @@
 """Semaphore FastAPI application."""
 
+import asyncio
 import json
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from importlib.metadata import version
 
 import structlog
@@ -21,7 +22,11 @@ from safir.slack.webhook import SlackRouteErrorHandler
 from . import __version__
 from .config import config
 from .dependencies.broadcastrepo import broadcast_repo_dependency
-from .github.broadcastservices import bootstrap_broadcast_repo
+from .dependencies.repolocks import repo_locks_dependency
+from .github.broadcastservices import (
+    bootstrap_broadcast_repo,
+    retry_failed_repos,
+)
 from .github.sourcepolicy import BroadcastSourcePolicy
 from .handlers.external import external_router
 from .handlers.internal import internal_router
@@ -57,20 +62,43 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Initialize the broadcast GitHub repository.
     broadcast_repo = await broadcast_repo_dependency()
+    retry_task: asyncio.Task[None] | None = None
     if config.github_app_disabled_reason:
         logger.warning(
             "GitHub App is disabled", reason=config.github_app_disabled_reason
         )
     if config.enable_github_app:
-        await bootstrap_broadcast_repo(
-            http_client=await http_client_dependency(),
+        http_client = await http_client_dependency()
+        failed_repos = await bootstrap_broadcast_repo(
+            http_client=http_client,
             broadcast_repo=broadcast_repo,
             source_policy=BroadcastSourcePolicy.from_config(config),
             logger=logger,
         )
+        if failed_repos:
+            # Startup does not wait for GitHub to recover. Each process
+            # retries for its own broadcast repository.
+            retry_task = asyncio.create_task(
+                retry_failed_repos(
+                    failed_repos=failed_repos,
+                    http_client=http_client,
+                    broadcast_repo=broadcast_repo,
+                    repo_locks=await repo_locks_dependency(),
+                    logger=logger,
+                ),
+                name="github-bootstrap-retry",
+            )
+    # The task retrying the repositories that failed at startup, if any, is
+    # kept on the app's state so that it can be inspected (as by tests).
+    app.state.github_retry_task = retry_task
 
     yield
 
+    if retry_task is not None:
+        # Stopped before the HTTP client it uses is closed.
+        retry_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await retry_task
     await db_session_dependency.aclose()
     await http_client_dependency.aclose()
 

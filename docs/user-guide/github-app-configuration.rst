@@ -38,6 +38,27 @@ While the GitHub App is disabled, the webhook endpoint returns ``501 Not Impleme
 The allowlist is Semaphore's own check on where broadcasts come from.
 The GitHub settings recommended on this page (a private app, installed on selected repositories, with a protected default branch) add further layers of defense around it.
 
+.. _github-app-startup:
+
+Loading broadcasts at startup
+=============================
+
+When Semaphore starts, it loads the broadcasts in the ``broadcasts`` directory of each accepted repository's default branch.
+Later changes arrive through push webhooks.
+
+- A malformed broadcast file is skipped with a warning, and the other broadcasts are still loaded.
+  Fix the file and push the fix to publish it.
+- A repository with no ``broadcasts`` directory has no broadcasts.
+  Git doesn't store empty directories, so a repository whose broadcasts have all been deleted looks like this.
+- If GitHub fails or can't be reached while Semaphore loads a repository (for example, with a server error, a timeout, an exceeded rate limit, or an authentication error), Semaphore logs a warning and still starts.
+  It then retries loading that repository in the background, waiting longer after each failed attempt (up to five minutes), until it succeeds.
+  The repository's broadcasts are served as soon as it loads, without restarting Semaphore.
+  Each Semaphore replica loads and retries on its own, so replicas may briefly serve different broadcasts while GitHub recovers.
+
+After loading, Semaphore logs a ``Loaded broadcasts from GitHub`` summary.
+Its ``failed_repo_count`` field is the number of repositories that are being retried, and ``skipped_file_count`` is the number of skipped files.
+Each retry logs ``Retrying loading broadcasts from a repository``, and a repository that loads after retrying logs ``Loaded broadcasts from a repository after retrying``.
+
 Create an app with a template URL
 =================================
 

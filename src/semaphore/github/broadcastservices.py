@@ -1,7 +1,8 @@
 """Orchestration around GitHub repository sources for broadcast messages."""
 
+import asyncio
 import dataclasses
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Iterator, Sequence
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Literal, Self
@@ -27,6 +28,18 @@ from .sourcepolicy import BroadcastSourcePolicy
 BROADCASTS_DIR = "broadcasts"
 """Directory relative to a GitHub repository's root that contains broadcast
 message files.
+"""
+
+BOOTSTRAP_RETRY_INITIAL_DELAY = 10.0
+"""Seconds to wait before the first attempt to load again the repositories
+that failed at startup (see `retry_failed_repos`). The wait doubles after
+each attempt in which a repository fails, up to
+`BOOTSTRAP_RETRY_MAX_DELAY`.
+"""
+
+BOOTSTRAP_RETRY_MAX_DELAY = 300.0
+"""Most seconds to wait between attempts to load again the repositories that
+failed at startup.
 """
 
 _ID_PREFIX = "github.com/"
@@ -353,7 +366,7 @@ async def _reload_repo_broadcasts(
             git_ref=head_sha,
         )
     except Exception as e:
-        if isinstance(e, BadRequest) and e.status_code == HTTPStatus.NOT_FOUND:
+        if _is_not_found(e):
             # The broadcasts directory does not exist at the commit.
             paths = []
         else:
@@ -647,24 +660,47 @@ async def add_file_to_repository(
     return broadcast_message
 
 
+@dataclasses.dataclass(frozen=True)
+class FailedRepo:
+    """A repository whose broadcasts GitHub failed to return, which must be
+    loaded again.
+    """
+
+    installation_id: str
+    """ID of the GitHub App installation that can see the repository."""
+
+    github_repo: dict[str, Any]
+    """The repository resource from the GitHub v3 API."""
+
+    @property
+    def full_name(self) -> str:
+        """Full name (``owner/repo``) of the repository."""
+        return self.github_repo["full_name"]
+
+
 async def bootstrap_broadcast_repo(
     *,
     http_client: httpx.AsyncClient,
     broadcast_repo: BroadcastMessageRepository,
     source_policy: BroadcastSourcePolicy,
     logger: BoundLogger,
-) -> None:
+) -> list[FailedRepo]:
     """Bootstrap data in the broadcast repo from GitHub repositories that the
     GitHub app has access to.
 
     Semaphore is a GitHub App that can be installed in specific repositories.
     Of the repositories that its installations can see, only those that
     ``source_policy`` allows are loaded; the others are skipped with a
-    warning, before any of their contents are requested. Content in an
-    allowed repository cannot stop startup: a broadcast file that cannot be
-    read or parsed, or a repository whose broadcasts cannot be listed, is
-    skipped with a warning and loading continues. A summary of what was
-    loaded is logged at the end.
+    warning, before any of their contents are requested.
+
+    Neither content nor GitHub errors in an allowed repository stop startup
+    (see `_load_repo_broadcasts`). A broadcast file that is malformed is
+    skipped with a warning. A repository without a broadcasts directory has
+    no broadcasts. A repository that GitHub fails to list, or one of whose
+    files GitHub fails to return, is logged with a warning and returned, so
+    that it can be loaded again with `retry_failed_repos`; the messages of
+    its other files are kept. A summary of what was loaded is logged at the
+    end.
 
     Parameters
     ----------
@@ -676,12 +712,19 @@ async def bootstrap_broadcast_repo(
         The policy for which repositories may publish broadcast messages.
     logger
         The logger instance.
+
+    Returns
+    -------
+    list of FailedRepo
+        The repositories that GitHub failed to return, in the order they were
+        loaded. Empty if every allowed repository was loaded.
     """
     github_client = create_github_client(http_client=http_client)
     jwt = get_app_jwt()
     repo_count = 0
     message_count = 0
     skipped_file_count = 0
+    failed_repos: list[FailedRepo] = []
     async for installation in iter_installations(
         github_client=github_client, jwt=jwt
     ):
@@ -705,19 +748,157 @@ async def bootstrap_broadcast_repo(
                 github_client=installation_client,
                 logger=logger,
             )
-            if result is None:
-                continue
-            repo_count += 1
             message_count += result.message_count
             skipped_file_count += result.skipped_file_count
+            if result.failed:
+                failed_repos.append(
+                    FailedRepo(
+                        installation_id=str(installation["id"]),
+                        github_repo=github_repo,
+                    )
+                )
+            else:
+                repo_count += 1
 
     logger.info(
         "Loaded broadcasts from GitHub",
         github_repos=source_policy.allowed_repos,
         repo_count=repo_count,
+        failed_repo_count=len(failed_repos),
         message_count=message_count,
         skipped_file_count=skipped_file_count,
     )
+    return failed_repos
+
+
+async def retry_failed_repos(
+    *,
+    failed_repos: Sequence[FailedRepo],
+    http_client: httpx.AsyncClient,
+    broadcast_repo: BroadcastMessageRepository,
+    repo_locks: RepoLocks,
+    logger: BoundLogger,
+) -> None:
+    """Load again the repositories that GitHub failed to return at startup,
+    until each one loads.
+
+    This is meant to run as a background task, so that startup does not
+    wait for GitHub to recover. Each attempt waits first, for
+    `BOOTSTRAP_RETRY_INITIAL_DELAY` seconds and then twice as long after
+    each attempt, up to `BOOTSTRAP_RETRY_MAX_DELAY`. Then it loads each
+    repository that is still failed in full, as at startup (see
+    `_load_repo_broadcasts`), with a new client authorized as the
+    repository's installation and under the repository's lock, so that it
+    does not interleave with a push to the repository. A repository that
+    fails again, including because its installation cannot be authorized,
+    is tried again in the next attempt. The function returns once every
+    repository has loaded.
+
+    Parameters
+    ----------
+    failed_repos
+        The repositories to load, as returned by `bootstrap_broadcast_repo`.
+    http_client
+        The httpx client.
+    broadcast_repo
+        The broadcast message repository.
+    repo_locks
+        The per-repository locks of broadcast sources.
+    logger
+        The logger instance.
+    """
+    pending = list(failed_repos)
+    delays = _iter_retry_delays()
+    attempt = 0
+    while pending:
+        await asyncio.sleep(next(delays))
+        attempt += 1
+        still_failed = []
+        for failed_repo in pending:
+            loaded = await _retry_repo(
+                failed_repo=failed_repo,
+                attempt=attempt,
+                http_client=http_client,
+                broadcast_repo=broadcast_repo,
+                repo_locks=repo_locks,
+                logger=logger,
+            )
+            if not loaded:
+                still_failed.append(failed_repo)
+        pending = still_failed
+
+
+def _iter_retry_delays() -> Iterator[float]:
+    """Iterate over the seconds to wait before each attempt of
+    `retry_failed_repos`: an exponential backoff that is capped.
+    """
+    delay = BOOTSTRAP_RETRY_INITIAL_DELAY
+    while True:
+        yield delay
+        delay = min(delay * 2, BOOTSTRAP_RETRY_MAX_DELAY)
+
+
+async def _retry_repo(
+    *,
+    failed_repo: FailedRepo,
+    attempt: int,
+    http_client: httpx.AsyncClient,
+    broadcast_repo: BroadcastMessageRepository,
+    repo_locks: RepoLocks,
+    logger: BoundLogger,
+) -> bool:
+    """Try once to load a repository that GitHub failed to return.
+
+    Parameters
+    ----------
+    failed_repo
+        The repository to load.
+    attempt
+        Number of the attempt of `retry_failed_repos`, starting at 1.
+    http_client
+        The httpx client.
+    broadcast_repo
+        The broadcast message repository.
+    repo_locks
+        The per-repository locks of broadcast sources.
+    logger
+        The logger instance.
+
+    Returns
+    -------
+    bool
+        Whether the repository loaded, rather than failing again.
+    """
+    logger = logger.bind(github_repo=failed_repo.full_name, attempt=attempt)
+    logger.info("Retrying loading broadcasts from a repository")
+    try:
+        # A new client for each attempt, since an installation's token
+        # expires after an hour.
+        github_client = await create_github_installation_client(
+            http_client=http_client,
+            installation_id=failed_repo.installation_id,
+        )
+        async with repo_locks.get(failed_repo.full_name):
+            result = await _load_repo_broadcasts(
+                github_repo=failed_repo.github_repo,
+                broadcast_repo=broadcast_repo,
+                github_client=github_client,
+                logger=logger,
+            )
+    except Exception:
+        logger.warning(
+            "Could not load the repository's broadcasts, will retry",
+            exc_info=True,
+        )
+        return False
+    if result.failed:
+        return False
+    logger.info(
+        "Loaded broadcasts from a repository after retrying",
+        message_count=result.message_count,
+        skipped_file_count=result.skipped_file_count,
+    )
+    return True
 
 
 @dataclasses.dataclass
@@ -732,6 +913,11 @@ class _RepoLoadResult:
     loaded.
     """
 
+    failed: bool = False
+    """Whether GitHub failed to list the repository's broadcasts or to return
+    any of its broadcast files, so that the repository must be loaded again.
+    """
+
 
 async def _load_repo_broadcasts(
     *,
@@ -739,13 +925,21 @@ async def _load_repo_broadcasts(
     broadcast_repo: BroadcastMessageRepository,
     github_client: GitHubAPI,
     logger: BoundLogger,
-) -> _RepoLoadResult | None:
+) -> _RepoLoadResult:
     """Load the broadcast messages in a GitHub repository's default branch.
 
-    A file that cannot be loaded, because of a GitHub error or because its
-    content is malformed, is skipped with a warning. If the repository's
-    broadcasts directory cannot be listed, the whole repository is skipped
-    with a warning.
+    Errors are handled by whether loading the repository again could fix
+    them (see `_is_github_failure`):
+
+    - A file whose content cannot be loaded, because it is malformed or
+      because GitHub reports that it does not exist (404), is skipped with
+      a warning. Loading the repository again would skip it again.
+    - If the repository has no broadcasts directory (GitHub returns a 404
+      for it), the repository has no broadcasts. Git does not store empty
+      directories, so this is how a repository without broadcasts looks.
+    - If GitHub fails to list the directory, or to return a file, for any
+      other reason, the repository is marked as failed with a warning. The
+      other files are still loaded.
 
     Parameters
     ----------
@@ -761,9 +955,8 @@ async def _load_repo_broadcasts(
 
     Returns
     -------
-    _RepoLoadResult or None
-        What was loaded from the repository, or `None` if the repository was
-        skipped.
+    _RepoLoadResult
+        What was loaded from the repository, and whether it failed.
     """
     logger = logger.bind(github_repo=github_repo["full_name"])
     logger.debug("Loading broadcasts from repository")
@@ -772,12 +965,15 @@ async def _load_repo_broadcasts(
             github_client=github_client,
             contents_url=github_repo["contents_url"],
         )
-    except Exception:
+    except Exception as e:
+        if _is_not_found(e):
+            logger.debug("Repository has no broadcasts directory")
+            return _RepoLoadResult()
         logger.warning(
-            "Skipping a repository whose broadcasts could not be listed",
+            "Could not list the repository's broadcasts, will retry",
             exc_info=True,
         )
-        return None
+        return _RepoLoadResult(failed=True)
 
     result = _RepoLoadResult()
     for path in paths:
@@ -796,17 +992,52 @@ async def _load_repo_broadcasts(
                 github_client=github_client,
                 logger=logger,
             )
-        except Exception:
-            logger.warning(
-                "Skipping a broadcast file that could not be loaded",
-                path=path,
-                exc_info=True,
-            )
-            result.skipped_file_count += 1
+        except Exception as e:
+            if _is_github_failure(e):
+                logger.warning(
+                    "Could not read a broadcast file from GitHub, will retry "
+                    "the repository",
+                    path=path,
+                    exc_info=True,
+                )
+                result.failed = True
+            else:
+                logger.warning(
+                    "Skipping a broadcast file that could not be loaded",
+                    path=path,
+                    exc_info=True,
+                )
+                result.skipped_file_count += 1
             continue
         if message is not None:
             result.message_count += 1
     return result
+
+
+def _is_github_failure(error: Exception) -> bool:
+    """Determine if an error reading from GitHub is a failure of GitHub or
+    of the connection to it, so that reading again later may succeed, rather
+    than a problem with the content that was read.
+
+    Failures are the GitHub errors, such as a 5xx response
+    (`~gidgethub.GitHubBroken`), an exceeded rate limit, or a 401 or 403
+    response, and the errors connecting to GitHub, including timeouts. A
+    404 response is not a failure: it means that the file or directory does
+    not exist.
+    """
+    if isinstance(error, httpx.TransportError):
+        return True
+    return isinstance(error, GitHubException) and not _is_not_found(error)
+
+
+def _is_not_found(error: Exception) -> bool:
+    """Determine if an error is GitHub's 404 response for a file or
+    directory that does not exist.
+    """
+    return (
+        isinstance(error, BadRequest)
+        and error.status_code == HTTPStatus.NOT_FOUND
+    )
 
 
 async def _list_broadcast_paths(

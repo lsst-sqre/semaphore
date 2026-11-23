@@ -566,11 +566,17 @@ class GitHubMock:
         status_code: int,
         repo: str = GITHUB_REPO,
         ref: str | None = None,
+        times: int = 1,
     ) -> None:
-        """Mock one request for a file or directory that GitHub fails.
+        """Mock requests for a file or directory that GitHub fails.
 
         A status code of 404 is how GitHub reports a file that does not exist
         at the requested ref.
+
+        Each of the next ``times`` requests for the file or directory fails,
+        and each must be made. Mock the file or directory afterwards with
+        `mock_file` or `mock_directory` to serve it to the request after
+        those, as when GitHub recovers.
 
         Parameters
         ----------
@@ -584,14 +590,60 @@ class GitHubMock:
             Git ref that the file or directory must be requested at, through
             the ``ref`` query parameter, or `None` if the request must not set
             a ref (reading the default branch).
+        times
+            Number of requests that fail.
         """
-        self._httpx_mock.add_response(
-            method="GET",
-            url=f"{GITHUB_API_URL}/repos/{repo}/contents/{path}",
-            match_params={"ref": ref} if ref is not None else None,
-            status_code=status_code,
-            json={"message": "GitHub error"},
+        for _ in range(times):
+            self._httpx_mock.add_response(
+                method="GET",
+                url=f"{GITHUB_API_URL}/repos/{repo}/contents/{path}",
+                match_params={"ref": ref} if ref is not None else None,
+                status_code=status_code,
+                json={"message": "GitHub error"},
+            )
+
+    def mock_contents_timeout(
+        self,
+        path: str,
+        *,
+        repo: str = GITHUB_REPO,
+        times: int = 1,
+    ) -> None:
+        """Mock requests for a file or directory that time out.
+
+        Each of the next ``times`` requests for the file or directory, on the
+        default branch, raises `httpx.ReadTimeout`, and each must be made.
+        Mock the file or directory afterwards to serve it to the request after
+        those.
+
+        Parameters
+        ----------
+        path
+            Path of the file or directory in the repository.
+        repo
+            Full name (``owner/repo``) of the repository.
+        times
+            Number of requests that time out.
+        """
+        for _ in range(times):
+            self._httpx_mock.add_exception(
+                httpx.ReadTimeout("Timed out reading from GitHub"),
+                method="GET",
+                url=f"{GITHUB_API_URL}/repos/{repo}/contents/{path}",
+            )
+
+    def get_token_requests(
+        self, installation_id: int = GITHUB_INSTALLATION_ID
+    ) -> list[httpx.Request]:
+        """Return the requests to create access tokens for an installation.
+
+        Each one is made for a new client authorized as the installation.
+        """
+        url = (
+            f"{GITHUB_API_URL}/app/installations/{installation_id}"
+            "/access_tokens"
         )
+        return [r for r in self.get_requests() if str(r.url) == url]
 
     def get_requests(self) -> list[httpx.Request]:
         """Return the requests made to the GitHub API."""
