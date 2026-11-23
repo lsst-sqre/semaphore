@@ -103,7 +103,7 @@ async def post_github_webhook(
     logger.debug("Received GitHub webhook", payload=event.data)
     try:
         installation_id = event.data["installation"]["id"]
-    except AttributeError:
+    except KeyError:
         return Response(
             "Did not find installation.id in the webhook event payload",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

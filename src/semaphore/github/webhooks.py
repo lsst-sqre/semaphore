@@ -39,7 +39,9 @@ async def handle_push_event(
     """Process ``push`` webhook events from GitHub.
 
     Pushes from repositories that ``source_policy`` rejects are ignored with
-    a warning, before any request is made to GitHub.
+    a warning, before any request is made to GitHub. Pushes that delete a
+    ref, or that are not to the repository's default branch, are also
+    ignored. Broadcast files are read at the pushed commit.
 
     Parameters
     ----------
@@ -67,11 +69,14 @@ async def handle_push_event(
         )
         return
 
-    git_ref = event.data["ref"]
+    # A push that deletes its ref has no commit to read. GitHub marks it
+    # with "deleted" and an all-zero "after" SHA; either is enough.
+    if event.data.get("deleted") or _is_null_sha(event.data["after"]):
+        logger.debug("Ignoring push that deletes a ref", ref=event.data["ref"])
+        return
 
-    # TODO(jsick): process only broadcasts on the HEAD branch. The name of
-    # this branch should be detected from the repository settings.
-    if git_ref != "refs/heads/main":
+    # Broadcasts are published only from the repository's default branch.
+    if event.data["ref"] != f"refs/heads/{repository['default_branch']}":
         return
 
     github_client = await create_github_installation_client(
@@ -93,3 +98,10 @@ async def handle_push_event(
             else "unknown"
         ),
     )
+
+
+def _is_null_sha(sha: str) -> bool:
+    """Determine if a commit SHA is the null SHA (all zeros) that GitHub
+    reports for the missing side of a push that creates or deletes a ref.
+    """
+    return not sha.strip("0")

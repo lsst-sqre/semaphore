@@ -27,10 +27,12 @@ from pytest_httpx import HTTPXMock
 from .config import reload_config
 
 __all__ = [
+    "DEFAULT_AFTER_SHA",
     "GITHUB_APP_ID",
     "GITHUB_INSTALLATION_ID",
     "GITHUB_REPO",
     "GITHUB_WEBHOOK_SECRET",
+    "NULL_SHA",
     "GitHubMock",
     "configure_github_app",
     "get_installation_token",
@@ -62,6 +64,11 @@ DEFAULT_AFTER_SHA = "c0ffee" + "0" * 34
 
 DEFAULT_BEFORE_SHA = "decade" + "0" * 34
 """Commit SHA a test push moves its branch from, unless set."""
+
+NULL_SHA = "0" * 40
+"""Commit SHA GitHub reports for the far side of a push that creates or
+deletes a ref.
+"""
 
 
 @cache
@@ -163,6 +170,7 @@ def make_push_payload(
     default_branch: str = "main",
     before: str = DEFAULT_BEFORE_SHA,
     after: str = DEFAULT_AFTER_SHA,
+    deleted: bool = False,
     added: list[str] | None = None,
     modified: list[str] | None = None,
     removed: list[str] | None = None,
@@ -187,6 +195,9 @@ def make_push_payload(
         Commit SHA of the ref before the push.
     after
         Commit SHA of the ref after the push.
+    deleted
+        Whether the push deletes the ref. GitHub also sets ``after`` to
+        `NULL_SHA` for such a push.
     added
         Paths of files the commit adds.
     modified
@@ -214,7 +225,7 @@ def make_push_payload(
         "before": before,
         "after": after,
         "created": False,
-        "deleted": False,
+        "deleted": deleted,
         "forced": False,
         "repository": {
             **make_repository(repo, fork=fork, default_branch=default_branch),
@@ -384,6 +395,7 @@ class GitHubMock:
         text: str,
         *,
         repo: str = GITHUB_REPO,
+        ref: str | None = None,
         optional: bool = False,
     ) -> None:
         """Mock one request for the raw contents of a file.
@@ -399,12 +411,17 @@ class GitHubMock:
             Contents of the file.
         repo
             Full name (``owner/repo``) of the repository.
+        ref
+            Git ref that the file must be requested at, through the ``ref``
+            query parameter, or `None` if the request must not set a ref
+            (reading the default branch).
         optional
             Whether the test passes even if the file is not requested.
         """
         self._httpx_mock.add_response(
             method="GET",
             url=f"{GITHUB_API_URL}/repos/{repo}/contents/{path}",
+            match_params={"ref": ref} if ref is not None else None,
             text=text,
             is_optional=optional,
         )

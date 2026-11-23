@@ -84,6 +84,10 @@ async def update_broadcast_repo_from_push_event(
     push event, either adding, modifying, or removing messages based on
     the pushed commits.
 
+    Added and modified files are read at the commit the push moved its ref
+    to (the payload's ``after`` SHA), so later pushes cannot change what is
+    read for this one.
+
     Parameters
     ----------
     event
@@ -116,6 +120,7 @@ async def update_broadcast_repo_from_push_event(
                 broadcast_repo=broadcast_repo,
                 github_client=github_client,
                 logger=logger,
+                git_ref=event.data["after"],
             )
         except RateLimitExceeded as e:
             logger.exception(
@@ -203,6 +208,7 @@ async def add_file_to_repository(
     broadcast_repo: BroadcastMessageRepository,
     github_client: GitHubAPI,
     logger: BoundLogger,
+    git_ref: str | None = None,
 ) -> BroadcastMessage | None:
     """Add/update a broadcast message in the repository from a file in a GitHub
     repository.
@@ -212,7 +218,9 @@ async def add_file_to_repository(
     file_path
         Posix path of the message's file in GitHub.
     message_ref
-        Reference for the message.
+        Reference for the message. Its git ref identifies the message; it
+        does not select the version of the file that is read (see
+        ``git_ref``).
     contents_url
         The URI template for the repository's contents (the template
         includs a ``path`` variable).
@@ -222,6 +230,10 @@ async def add_file_to_repository(
         The GitHub API client, pre-authorized as an app installation.
     logger
         The logger instance
+    git_ref
+        The git ref (commit SHA, branch, or tag) to read the file at. If
+        `None`, the file is read from the repository's default branch as it
+        is at the time of the request.
 
     Returns
     -------
@@ -235,11 +247,14 @@ async def add_file_to_repository(
         Raised if there is an issue with GitHub. The sub-class
         RateLimitExceeded indicates if the client has exceeded its rate limit.
     """
-    logger = logger.bind(message_id=message_ref.as_id())
+    logger = logger.bind(message_id=message_ref.as_id(), git_ref=git_ref)
 
     markdown_text = await github_client.getitem(
-        contents_url,
-        url_vars={"path": file_path},
+        # The contents URL template has no variable for the ref, which the
+        # contents API takes as a query parameter. A ref of None is omitted
+        # from the expanded URL.
+        contents_url + "{?ref}",
+        url_vars={"path": file_path, "ref": git_ref},
         accept=accept_format(media="raw", json=False),
     )
     logger.debug(
