@@ -30,6 +30,12 @@ HELLO_MD = "---\nsummary: Hello from GitHub.\n---\n"
 GOODBYE_MD = "---\nsummary: Goodbye from GitHub.\n---\n"
 """Updated contents of the `HELLO_MD` broadcast message file."""
 
+HELLO_THIS_ENV_MD = "---\nsummary: Hello from GitHub.\nenv: [idfdev]\n---\n"
+"""A broadcast message file targeted at the test Phalanx environment."""
+
+HELLO_OTHER_ENV_MD = "---\nsummary: Hello from GitHub.\nenv: [usdfprod]\n---\n"
+"""A broadcast message file targeted only at another Phalanx environment."""
+
 
 @pytest_asyncio.fixture
 async def client_without_repos(
@@ -215,6 +221,51 @@ async def test_push_updates_broadcast(
         make_message_id("broadcasts/hello.md")
     ]
     assert broadcasts[0]["summary"]["gfm"] == "Goodbye from GitHub."
+
+
+@pytest.mark.asyncio
+async def test_push_adds_broadcast_for_other_env(
+    github_app_client: AsyncClient,
+    github_mock: GitHubMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    github_mock.mock_installation_token()
+    github_mock.mock_file(
+        "broadcasts/hello.md", HELLO_OTHER_ENV_MD, ref=DEFAULT_AFTER_SHA
+    )
+    payload = make_push_payload(added=["broadcasts/hello.md"])
+
+    response = await post_github_webhook(github_app_client, "push", payload)
+
+    assert response.status_code == 202
+    assert await get_broadcasts(github_app_client) == []
+    logs = parse_log_tuples("semaphore", caplog.record_tuples)
+    assert [log for log in logs if log["severity"] == "error"] == []
+
+
+@pytest.mark.asyncio
+async def test_push_retargeting_broadcast_to_other_env(
+    github_app_client: AsyncClient, github_mock: GitHubMock
+) -> None:
+    """A broadcast whose ``env`` no longer includes this environment is
+    removed.
+    """
+    github_mock.mock_installation_token()
+    github_mock.mock_file(
+        "broadcasts/hello.md", HELLO_THIS_ENV_MD, ref=DEFAULT_AFTER_SHA
+    )
+    github_mock.mock_file(
+        "broadcasts/hello.md", HELLO_OTHER_ENV_MD, ref=DEFAULT_AFTER_SHA
+    )
+    add = make_push_payload(added=["broadcasts/hello.md"])
+    await post_github_webhook(github_app_client, "push", add)
+    assert len(await get_broadcasts(github_app_client)) == 1
+    retarget = make_push_payload(modified=["broadcasts/hello.md"])
+
+    response = await post_github_webhook(github_app_client, "push", retarget)
+
+    assert response.status_code == 202
+    assert await get_broadcasts(github_app_client) == []
 
 
 @pytest.mark.asyncio

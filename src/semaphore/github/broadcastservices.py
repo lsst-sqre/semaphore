@@ -213,6 +213,10 @@ async def add_file_to_repository(
     """Add/update a broadcast message in the repository from a file in a GitHub
     repository.
 
+    If the file is not relevant to this Phalanx environment, it is not added,
+    and a message already stored under the same identifier is removed (the
+    file may have been retargeted away from this environment).
+
     Parameters
     ----------
     file_path
@@ -239,7 +243,7 @@ async def add_file_to_repository(
     -------
     BroadcastMessage or None
         The message added to the repository, or `None` if the message is not
-        relevant to this Phalanx environment and was skipped.
+        relevant to this Phalanx environment and was skipped (or removed).
 
     Raises
     ------
@@ -247,7 +251,8 @@ async def add_file_to_repository(
         Raised if there is an issue with GitHub. The sub-class
         RateLimitExceeded indicates if the client has exceeded its rate limit.
     """
-    logger = logger.bind(message_id=message_ref.as_id(), git_ref=git_ref)
+    message_id = message_ref.as_id()
+    logger = logger.bind(message_id=message_id, git_ref=git_ref)
 
     markdown_text = await github_client.getitem(
         # The contents URL template has no variable for the ref, which the
@@ -267,13 +272,21 @@ async def add_file_to_repository(
     )
     broadcast_markdown = BroadcastMarkdown(
         text=markdown_text,
-        identifier=message_ref.as_id(),
+        identifier=message_id,
     )
     if not broadcast_markdown.is_relevant_to_env(config.phalanx_env):
         logger.debug(
             "Skipping broadcast message from GitHub because it is "
             "irrelevant to this Phalanx environment."
         )
+        # The file may have been retargeted away from this environment, so
+        # a version stored from before the change must stop being served.
+        if message_id in broadcast_repo:
+            broadcast_repo.remove(message_id)
+            logger.info(
+                "Removed broadcast message that is no longer relevant to "
+                "this Phalanx environment"
+            )
         return None
 
     broadcast_message = broadcast_markdown.to_broadcast()
