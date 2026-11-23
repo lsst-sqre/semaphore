@@ -22,7 +22,9 @@ from semaphore import main
 from semaphore.broadcast.repository import BroadcastMessageRepository
 from semaphore.config import config
 from semaphore.dependencies.broadcastrepo import broadcast_repo_dependency
+from semaphore.dependencies.repolocks import repo_locks_dependency
 from semaphore.github import webhooks
+from semaphore.github.repolocks import RepoLocks
 from semaphore.schema import SchemaBase
 
 from .support.constants import TEST_BASE_URL
@@ -51,13 +53,15 @@ async def admin_client(app: FastAPI) -> AsyncGenerator[AsyncClient]:
 
 @pytest_asyncio.fixture
 async def app(
-    empty_database: None, broadcast_repo: BroadcastMessageRepository
+    empty_database: None,
+    broadcast_repo: BroadcastMessageRepository,
+    repo_locks: RepoLocks,
 ) -> AsyncGenerator[FastAPI]:
     """Return a configured test application.
 
     Wraps the application in a lifespan manager so that startup and shutdown
     events are sent during test execution. Each test starts with an empty
-    broadcast repository.
+    broadcast repository and its own per-repository locks.
     """
     async with LifespanManager(main.app):
         yield main.app
@@ -135,6 +139,19 @@ def github_mock(httpx_mock: HTTPXMock) -> GitHubMock:
     Any request to GitHub that the test does not mock fails the test.
     """
     return GitHubMock(httpx_mock)
+
+
+@pytest.fixture
+def repo_locks(monkeypatch: pytest.MonkeyPatch) -> RepoLocks:
+    """Give the app new per-repository locks for the test.
+
+    An asyncio lock is bound to the event loop that first waits on it, and
+    each test runs in its own event loop, so locks are not shared between
+    tests.
+    """
+    locks = RepoLocks()
+    monkeypatch.setattr(repo_locks_dependency, "locks", locks)
+    return locks
 
 
 @pytest_asyncio.fixture

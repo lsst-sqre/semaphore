@@ -11,6 +11,7 @@ from structlog.stdlib import BoundLogger
 from ..broadcast.repository import BroadcastMessageRepository
 from .broadcastservices import update_broadcast_repo_from_push_event
 from .client import create_github_installation_client
+from .repolocks import RepoLocks
 from .sourcepolicy import BroadcastSourcePolicy
 
 __all__ = ["GITHUB_CONSISTENCY_DELAY", "router"]
@@ -33,6 +34,7 @@ async def handle_push_event(
     http_client: httpx.AsyncClient,
     installation_id: str,
     source_policy: BroadcastSourcePolicy,
+    repo_locks: RepoLocks,
     logger: BoundLogger,
     **kwargs: Any,
 ) -> None:
@@ -41,7 +43,9 @@ async def handle_push_event(
     Pushes from repositories that ``source_policy`` rejects are ignored with
     a warning, before any request is made to GitHub. Pushes that delete a
     ref, or that are not to the repository's default branch, are also
-    ignored. Broadcast files are read at the pushed commit.
+    ignored. The broadcast files that a push touches are reconciled with the
+    default branch's current head, one push per repository at a time (see
+    `update_broadcast_repo_from_push_event`).
 
     Parameters
     ----------
@@ -56,6 +60,8 @@ async def handle_push_event(
         The ID of the GitHub App installation that sent the event.
     source_policy
         The policy for which repositories may publish broadcast messages.
+    repo_locks
+        The per-repository locks that serialize pushes for one repository.
     logger
         The logger instance
     """
@@ -87,6 +93,7 @@ async def handle_push_event(
         event=event,
         broadcast_repo=broadcast_repo,
         github_client=github_client,
+        repo_locks=repo_locks,
         logger=logger,
     )
 

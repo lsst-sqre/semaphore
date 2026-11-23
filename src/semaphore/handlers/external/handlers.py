@@ -14,6 +14,8 @@ from structlog.stdlib import BoundLogger
 from ...broadcast.repository import BroadcastMessageRepository
 from ...config import config
 from ...dependencies.broadcastrepo import broadcast_repo_dependency
+from ...dependencies.repolocks import repo_locks_dependency
+from ...github.repolocks import RepoLocks
 from ...github.sourcepolicy import BroadcastSourcePolicy
 from ...github.webhooks import router as webhook_router
 from .models import Index
@@ -74,6 +76,7 @@ async def post_github_webhook(
     broadcast_repo: Annotated[
         BroadcastMessageRepository, Depends(broadcast_repo_dependency)
     ],
+    repo_locks: Annotated[RepoLocks, Depends(repo_locks_dependency)],
 ) -> Response:
     """Process GitHub webhook events."""
     if not config.enable_github_app:
@@ -116,6 +119,7 @@ async def post_github_webhook(
         http_client=http_client,
         installation_id=installation_id,
         source_policy=BroadcastSourcePolicy.from_config(config),
+        repo_locks=repo_locks,
         logger=logger,
     )
     return Response(status_code=status.HTTP_202_ACCEPTED)

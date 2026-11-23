@@ -2,9 +2,11 @@
 
 These helpers configure the GitHub App, sign and post webhook events to
 Semaphore, and mock the GitHub REST API with pytest-httpx, including the app
-installations, repositories and contents that Semaphore reads at startup.
+installations, repositories and contents that Semaphore reads at startup and
+the branch heads that it resolves for pushes.
 """
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -34,6 +36,7 @@ __all__ = [
     "GITHUB_WEBHOOK_SECRET",
     "NULL_SHA",
     "GitHubMock",
+    "HeldResponse",
     "configure_github_app",
     "get_installation_token",
     "make_message_id",
@@ -275,6 +278,35 @@ async def post_github_webhook(
     )
 
 
+class HeldResponse:
+    """Hold a mocked GitHub response until the test releases it.
+
+    Pass an instance to a `GitHubMock` method that accepts one, so that the
+    test can act while Semaphore waits for GitHub's response.
+    """
+
+    def __init__(self) -> None:
+        self._requested = asyncio.Event()
+        self._released = asyncio.Event()
+
+    async def wait_for_request(self) -> None:
+        """Wait, for up to five seconds, until the request is made."""
+        async with asyncio.timeout(5):
+            await self._requested.wait()
+
+    def release(self) -> None:
+        """Let the mock send the response."""
+        self._released.set()
+
+    async def hold(self) -> None:
+        """Note the request and wait until the test releases the response.
+
+        The mock calls this when the request is made.
+        """
+        self._requested.set()
+        await self._released.wait()
+
+
 class GitHubMock:
     """Mock the GitHub REST API as seen by Semaphore's GitHub App.
 
@@ -379,6 +411,76 @@ class GitHubMock:
                 },
             )
 
+    def mock_branch_head(
+        self,
+        sha: str,
+        *,
+        branch: str = "main",
+        repo: str = GITHUB_REPO,
+        held: HeldResponse | None = None,
+    ) -> None:
+        """Mock one request for the commit that a branch points to.
+
+        Mock the branch again to serve a different commit to a later request.
+
+        Parameters
+        ----------
+        sha
+            Commit SHA that the branch points to.
+        branch
+            Name of the branch.
+        repo
+            Full name (``owner/repo``) of the repository.
+        held
+            If set, the response is held until the test releases it, so that
+            the test can act while Semaphore waits for GitHub.
+        """
+        url = f"{GITHUB_API_URL}/repos/{repo}/git/ref/heads/{branch}"
+        body = {
+            "ref": f"refs/heads/{branch}",
+            "url": url,
+            "object": {
+                "type": "commit",
+                "sha": sha,
+                "url": f"{GITHUB_API_URL}/repos/{repo}/git/commits/{sha}",
+            },
+        }
+        if held is None:
+            self._httpx_mock.add_response(method="GET", url=url, json=body)
+            return
+
+        async def respond(request: httpx.Request) -> httpx.Response:
+            await held.hold()
+            return httpx.Response(200, json=body)
+
+        self._httpx_mock.add_callback(respond, method="GET", url=url)
+
+    def mock_branch_head_error(
+        self,
+        *,
+        status_code: int,
+        branch: str = "main",
+        repo: str = GITHUB_REPO,
+    ) -> None:
+        """Mock one request for the commit that a branch points to that
+        GitHub fails.
+
+        Parameters
+        ----------
+        status_code
+            HTTP status code of GitHub's error response.
+        branch
+            Name of the branch.
+        repo
+            Full name (``owner/repo``) of the repository.
+        """
+        self._httpx_mock.add_response(
+            method="GET",
+            url=f"{GITHUB_API_URL}/repos/{repo}/git/ref/heads/{branch}",
+            status_code=status_code,
+            json={"message": "GitHub error"},
+        )
+
     def mock_directory(
         self,
         path: str,
@@ -448,9 +550,17 @@ class GitHubMock:
         )
 
     def mock_contents_error(
-        self, path: str, *, status_code: int, repo: str = GITHUB_REPO
+        self,
+        path: str,
+        *,
+        status_code: int,
+        repo: str = GITHUB_REPO,
+        ref: str | None = None,
     ) -> None:
         """Mock one request for a file or directory that GitHub fails.
+
+        A status code of 404 is how GitHub reports a file that does not exist
+        at the requested ref.
 
         Parameters
         ----------
@@ -460,10 +570,15 @@ class GitHubMock:
             HTTP status code of GitHub's error response.
         repo
             Full name (``owner/repo``) of the repository.
+        ref
+            Git ref that the file or directory must be requested at, through
+            the ``ref`` query parameter, or `None` if the request must not set
+            a ref (reading the default branch).
         """
         self._httpx_mock.add_response(
             method="GET",
             url=f"{GITHUB_API_URL}/repos/{repo}/contents/{path}",
+            match_params={"ref": ref} if ref is not None else None,
             status_code=status_code,
             json={"message": "GitHub error"},
         )

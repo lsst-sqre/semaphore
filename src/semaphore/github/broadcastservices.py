@@ -2,11 +2,12 @@
 
 import dataclasses
 from collections.abc import AsyncGenerator, Sequence
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Self
 
 import httpx
-from gidgethub import GitHubException, RateLimitExceeded
+from gidgethub import BadRequest, GitHubException, RateLimitExceeded
 from gidgethub.httpx import GitHubAPI
 from gidgethub.sansio import Event, accept_format
 from structlog.stdlib import BoundLogger
@@ -20,6 +21,7 @@ from .client import (
     create_github_installation_client,
     get_app_jwt,
 )
+from .repolocks import RepoLocks
 from .sourcepolicy import BroadcastSourcePolicy
 
 BROADCASTS_DIR = "broadcasts"
@@ -78,15 +80,26 @@ async def update_broadcast_repo_from_push_event(
     event: Event,
     broadcast_repo: BroadcastMessageRepository,
     github_client: GitHubAPI,
+    repo_locks: RepoLocks,
     logger: BoundLogger,
 ) -> None:
     """Update messages in the repository based on a GitHub webhook for the
-    push event, either adding, modifying, or removing messages based on
-    the pushed commits.
+    push event to a repository's default branch.
 
-    Added and modified files are read at the commit the push moved its ref
-    to (the payload's ``after`` SHA), so later pushes cannot change what is
-    read for this one.
+    The push's commits determine which broadcast files it touched (added,
+    modified or removed). Each of those files is reconciled with the
+    default branch as it is when the push is processed, rather than as the
+    push left it: the branch's head commit is looked up once, and every file
+    is read at that commit. A file that exists there is added or updated,
+    and a file that does not is removed. So a push that GitHub redelivers,
+    or that arrives after a later push, cannot revert a message or bring
+    back a removed one. For a push that is still the branch's head, the head
+    is the push's ``after`` commit.
+
+    The repository's lock is held throughout, so pushes for one repository
+    are processed one at a time. If the head cannot be looked up, the push
+    is ignored with an error log. Other GitHub errors on a file, unlike the
+    404 of a missing file, are logged and leave the file's message as it is.
 
     Parameters
     ----------
@@ -96,6 +109,8 @@ async def update_broadcast_repo_from_push_event(
         The broadcast message repository.
     github_client
         The GitHub API client, pre-authorized as an app installation.
+    repo_locks
+        The per-repository locks of broadcast sources.
     logger
         The logger instance
     """
@@ -110,39 +125,148 @@ async def update_broadcast_repo_from_push_event(
         files_removed=list(files_removed),
     )
 
-    for path in filter(is_broadcast_message, files_written):
-        message_ref = GitHubMessageRef.from_push_event(path=path, event=event)
+    paths = sorted(filter(is_broadcast_message, files_written | files_removed))
+    if not paths:
+        return
+
+    repository = event.data["repository"]
+    async with repo_locks.get(repository["full_name"]):
         try:
-            await add_file_to_repository(
+            head_sha = await get_branch_head_sha(
+                github_client=github_client,
+                repo_full_name=repository["full_name"],
+                branch=repository["default_branch"],
+            )
+        except Exception as e:
+            logger.exception(
+                "Could not look up the default branch's head, ignoring the "
+                "push",
+                github_repo=repository["full_name"],
+                branch=repository["default_branch"],
+                error=str(e),
+            )
+            return
+        logger.debug(
+            "Reading broadcast files at the default branch's head",
+            head_sha=head_sha,
+            after_sha=event.data["after"],
+        )
+
+        for path in paths:
+            await _reconcile_file_at_commit(
                 file_path=path,
-                message_ref=message_ref,
-                contents_url=event.data["repository"]["contents_url"],
+                message_ref=GitHubMessageRef.from_push_event(
+                    path=path, event=event
+                ),
+                contents_url=repository["contents_url"],
+                git_ref=head_sha,
                 broadcast_repo=broadcast_repo,
                 github_client=github_client,
                 logger=logger,
-                git_ref=event.data["after"],
             )
-        except RateLimitExceeded as e:
-            logger.exception(
-                "GitHub rate limit exception",
-                limit=e.rate_limit.limit,
-                remaining=e.rate_limit.remaining,
-                resets_at=e.rate_limit.reset_datetime,
-            )
-        except GitHubException as e:
-            logger.exception("GitHub error", error=str(e))
-        except Exception as e:
-            logger.exception("Unknown error", error=str(e))
 
-    for path in filter(is_broadcast_message, files_removed):
-        message_id = GitHubMessageRef.from_push_event(
-            path=path, event=event
-        ).as_id()
-        broadcast_repo.remove(message_id)
-        logger.debug(
-            "Removed message from repo",
-            message_id=message_id,
+
+async def _reconcile_file_at_commit(
+    *,
+    file_path: str,
+    message_ref: GitHubMessageRef,
+    contents_url: str,
+    git_ref: str,
+    broadcast_repo: BroadcastMessageRepository,
+    github_client: GitHubAPI,
+    logger: BoundLogger,
+) -> None:
+    """Make a broadcast message match its file as it is at a commit.
+
+    If the file exists at the commit, its message is added or updated (see
+    `add_file_to_repository`). If GitHub reports that the file does not
+    exist (404), its message is removed. Any other error is logged and the
+    stored message, if any, is left unchanged.
+
+    Parameters
+    ----------
+    file_path
+        Posix path of the message's file in GitHub.
+    message_ref
+        Reference for the message, which identifies it.
+    contents_url
+        The URI template for the repository's contents.
+    git_ref
+        The commit SHA to read the file at.
+    broadcast_repo
+        The broadcast message repository.
+    github_client
+        The GitHub API client, pre-authorized as an app installation.
+    logger
+        The logger instance
+    """
+    try:
+        await add_file_to_repository(
+            file_path=file_path,
+            message_ref=message_ref,
+            contents_url=contents_url,
+            broadcast_repo=broadcast_repo,
+            github_client=github_client,
+            logger=logger,
+            git_ref=git_ref,
         )
+    except RateLimitExceeded as e:
+        logger.exception(
+            "GitHub rate limit exception",
+            limit=e.rate_limit.limit,
+            remaining=e.rate_limit.remaining,
+            resets_at=e.rate_limit.reset_datetime,
+        )
+    except BadRequest as e:
+        if e.status_code == HTTPStatus.NOT_FOUND:
+            message_id = message_ref.as_id()
+            broadcast_repo.remove(message_id)
+            logger.debug(
+                "Removed message whose file does not exist",
+                message_id=message_id,
+                git_ref=git_ref,
+            )
+        else:
+            logger.exception("GitHub error", error=str(e))
+    except GitHubException as e:
+        logger.exception("GitHub error", error=str(e))
+    except Exception as e:
+        logger.exception("Unknown error", error=str(e))
+
+
+async def get_branch_head_sha(
+    *, github_client: GitHubAPI, repo_full_name: str, branch: str
+) -> str:
+    """Get the commit SHA that a branch of a GitHub repository points to.
+
+    Parameters
+    ----------
+    github_client
+        The GitHub API client, pre-authorized as an app installation that
+        can see the repository.
+    repo_full_name
+        Full name (``owner/repo``) of the repository.
+    branch
+        Name of the branch, such as ``main``.
+
+    Returns
+    -------
+    str
+        The commit SHA of the branch's head.
+
+    Raises
+    ------
+    GitHubException
+        Raised if there is an issue with GitHub, including the branch not
+        existing.
+    """
+    owner, repo = repo_full_name.split("/", maxsplit=1)
+    git_ref = await github_client.getitem(
+        # Branch names may contain slashes, which stay path separators.
+        "/repos/{owner}/{repo}/git/ref/heads/{+branch}",
+        url_vars={"owner": owner, "repo": repo, "branch": branch},
+    )
+    return git_ref["object"]["sha"]
 
 
 def _integrate_file_changes_in_commits(
