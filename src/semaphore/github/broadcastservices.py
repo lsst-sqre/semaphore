@@ -12,6 +12,7 @@ from gidgethub.sansio import Event, accept_format
 from structlog.stdlib import BoundLogger
 
 from ..broadcast.markdown import BroadcastMarkdown
+from ..broadcast.models import BroadcastMessage
 from ..broadcast.repository import BroadcastMessageRepository
 from ..config import config
 from .client import (
@@ -19,6 +20,7 @@ from .client import (
     create_github_installation_client,
     get_app_jwt,
 )
+from .sourcepolicy import BroadcastSourcePolicy
 
 BROADCASTS_DIR = "broadcasts"
 """Directory relative to a GitHub repository's root that contains broadcast
@@ -201,7 +203,7 @@ async def add_file_to_repository(
     broadcast_repo: BroadcastMessageRepository,
     github_client: GitHubAPI,
     logger: BoundLogger,
-) -> None:
+) -> BroadcastMessage | None:
     """Add/update a broadcast message in the repository from a file in a GitHub
     repository.
 
@@ -220,6 +222,12 @@ async def add_file_to_repository(
         The GitHub API client, pre-authorized as an app installation.
     logger
         The logger instance
+
+    Returns
+    -------
+    BroadcastMessage or None
+        The message added to the repository, or `None` if the message is not
+        relevant to this Phalanx environment and was skipped.
 
     Raises
     ------
@@ -251,27 +259,31 @@ async def add_file_to_repository(
             "Skipping broadcast message from GitHub because it is "
             "irrelevant to this Phalanx environment."
         )
-        return
+        return None
 
     broadcast_message = broadcast_markdown.to_broadcast()
     broadcast_repo.add(broadcast_message)
     logger.debug(
         "Added broadcast to the repository",
     )
+    return broadcast_message
 
 
 async def bootstrap_broadcast_repo(
     *,
     http_client: httpx.AsyncClient,
     broadcast_repo: BroadcastMessageRepository,
+    source_policy: BroadcastSourcePolicy,
     logger: BoundLogger,
 ) -> None:
     """Bootstrap data in the broadcast repo from GitHub repositories that the
     GitHub app has access to.
 
     Semaphore is a GitHub App that can be installed in specific repositories.
-    Semaphore's heuristic is that any repo it is installed in is eligible for
-    contributing repos.
+    Of the repositories that its installations can see, only those that
+    ``source_policy`` allows are loaded; the others are skipped with a
+    warning, before any of their contents are requested. A summary of what
+    was loaded is logged at the end.
 
     Parameters
     ----------
@@ -279,11 +291,15 @@ async def bootstrap_broadcast_repo(
         The httpx client.
     broadcast_repo
         The broadcast message repository.
+    source_policy
+        The policy for which repositories may publish broadcast messages.
     logger
         The logger instance.
     """
     github_client = create_github_client(http_client=http_client)
     jwt = get_app_jwt()
+    repo_count = 0
+    message_count = 0
     async for installation in iter_installations(
         github_client=github_client, jwt=jwt
     ):
@@ -293,27 +309,82 @@ async def bootstrap_broadcast_repo(
         async for github_repo in iter_installation_repositories(
             github_client=installation_client
         ):
-            logger.debug("interating on github_repo", github_repo=github_repo)
-            async for file_obj in iter_repo_dir_contents(
+            decision = source_policy.evaluate(github_repo)
+            if not decision.allowed:
+                logger.warning(
+                    "Skipping a repository that may not publish broadcasts",
+                    github_repo=github_repo.get("full_name"),
+                    reason=decision.reason,
+                )
+                continue
+            repo_count += 1
+            message_count += await _load_repo_broadcasts(
+                github_repo=github_repo,
+                broadcast_repo=broadcast_repo,
                 github_client=installation_client,
-                contents_url=github_repo["contents_url"],
-                directory_path=BROADCASTS_DIR,
-            ):
-                if is_broadcast_message(file_obj["path"]):
-                    message_ref = GitHubMessageRef(
-                        path=file_obj["path"],
-                        repo_name=github_repo["name"],
-                        repo_owner=github_repo["owner"]["login"],
-                        ref=f"refs/heads/{github_repo['default_branch']}",
-                    )
-                    await add_file_to_repository(
-                        file_path=file_obj["path"],
-                        message_ref=message_ref,
-                        contents_url=github_repo["contents_url"],
-                        broadcast_repo=broadcast_repo,
-                        github_client=installation_client,
-                        logger=logger,
-                    )
+                logger=logger,
+            )
+
+    logger.info(
+        "Loaded broadcasts from GitHub",
+        github_repos=source_policy.allowed_repos,
+        repo_count=repo_count,
+        message_count=message_count,
+    )
+
+
+async def _load_repo_broadcasts(
+    *,
+    github_repo: dict[str, Any],
+    broadcast_repo: BroadcastMessageRepository,
+    github_client: GitHubAPI,
+    logger: BoundLogger,
+) -> int:
+    """Load the broadcast messages in a GitHub repository's default branch.
+
+    Parameters
+    ----------
+    github_repo
+        The repository resource from the GitHub v3 API.
+    broadcast_repo
+        The broadcast message repository.
+    github_client
+        The GitHub API client, pre-authorized as an app installation that
+        can see the repository.
+    logger
+        The logger instance.
+
+    Returns
+    -------
+    int
+        The number of messages added to the broadcast message repository.
+    """
+    logger.debug("Loading broadcasts from repository", github_repo=github_repo)
+    message_count = 0
+    async for file_obj in iter_repo_dir_contents(
+        github_client=github_client,
+        contents_url=github_repo["contents_url"],
+        directory_path=BROADCASTS_DIR,
+    ):
+        if not is_broadcast_message(file_obj["path"]):
+            continue
+        message_ref = GitHubMessageRef(
+            path=file_obj["path"],
+            repo_name=github_repo["name"],
+            repo_owner=github_repo["owner"]["login"],
+            ref=f"refs/heads/{github_repo['default_branch']}",
+        )
+        message = await add_file_to_repository(
+            file_path=file_obj["path"],
+            message_ref=message_ref,
+            contents_url=github_repo["contents_url"],
+            broadcast_repo=broadcast_repo,
+            github_client=github_client,
+            logger=logger,
+        )
+        if message is not None:
+            message_count += 1
+    return message_count
 
 
 async def iter_installations(

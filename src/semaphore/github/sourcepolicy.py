@@ -53,7 +53,10 @@ class BroadcastSourcePolicy:
     """
 
     def __init__(self, allowed_repos: Iterable[str]) -> None:
-        self._allowed_repos = frozenset(name.lower() for name in allowed_repos)
+        self._configured_repos = list(allowed_repos)
+        self._allowed_repos = frozenset(
+            name.lower() for name in self._configured_repos
+        )
 
     @classmethod
     def from_config(cls, config: Config) -> Self:
@@ -71,6 +74,11 @@ class BroadcastSourcePolicy:
             The policy.
         """
         return cls(config.github_repos)
+
+    @property
+    def allowed_repos(self) -> list[str]:
+        """Full names of the allowed repositories, as configured."""
+        return list(self._configured_repos)
 
     def evaluate(self, repository: Mapping[str, Any]) -> SourceDecision:
         """Decide whether a repository may publish broadcast messages.

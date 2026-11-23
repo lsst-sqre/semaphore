@@ -1,12 +1,15 @@
 """Test utilities for Semaphore's GitHub App integration.
 
 These helpers configure the GitHub App, sign and post webhook events to
-Semaphore, and mock the GitHub REST API with pytest-httpx.
+Semaphore, and mock the GitHub REST API with pytest-httpx, including the app
+installations, repositories and contents that Semaphore reads at startup.
 """
 
 import hashlib
 import hmac
 import json
+import zlib
+from collections.abc import Iterable
 from functools import cache
 from typing import Any
 from uuid import uuid4
@@ -30,8 +33,10 @@ __all__ = [
     "GITHUB_WEBHOOK_SECRET",
     "GitHubMock",
     "configure_github_app",
+    "get_installation_token",
     "make_message_id",
     "make_push_payload",
+    "make_repository",
     "post_github_webhook",
 ]
 
@@ -100,11 +105,54 @@ def configure_github_app(
     reload_config(monkeypatch)
 
 
+def get_installation_token(installation_id: int) -> str:
+    """Return the access token `GitHubMock` issues to an installation."""
+    return f"ghs_test-installation-{installation_id}"
+
+
 def make_message_id(
     path: str, *, repo: str = GITHUB_REPO, ref: str = "refs/heads/main"
 ) -> str:
     """Return the identifier of a broadcast message sourced from GitHub."""
     return f"github.com/{repo}/{path}/?ref={ref}"
+
+
+def make_repository(
+    repo: str = GITHUB_REPO,
+    *,
+    fork: bool = False,
+    default_branch: str = "main",
+) -> dict[str, Any]:
+    """Make a GitHub repository resource, as listed by the REST API.
+
+    Only the fields Semaphore reads, plus a few for realism, are included.
+
+    Parameters
+    ----------
+    repo
+        Full name (``owner/repo``) of the repository.
+    fork
+        Whether the repository is a fork.
+    default_branch
+        The repository's default branch.
+
+    Returns
+    -------
+    dict
+        The repository resource.
+    """
+    owner, name = repo.split("/")
+    return {
+        "id": zlib.crc32(repo.encode()),
+        "name": name,
+        "full_name": repo,
+        "owner": {"login": owner},
+        "private": False,
+        "fork": fork,
+        "default_branch": default_branch,
+        "url": f"{GITHUB_API_URL}/repos/{repo}",
+        "contents_url": f"{GITHUB_API_URL}/repos/{repo}/contents/{{+path}}",
+    }
 
 
 def make_push_payload(
@@ -153,8 +201,7 @@ def make_push_payload(
     dict
         The webhook payload.
     """
-    owner, name = repo.split("/")
-    contents_url = f"{GITHUB_API_URL}/repos/{repo}/contents/{{+path}}"
+    owner = repo.split("/", maxsplit=1)[0]
     commit = {
         "id": after,
         "message": "Update broadcasts",
@@ -170,16 +217,12 @@ def make_push_payload(
         "deleted": False,
         "forced": False,
         "repository": {
-            "id": 1,
-            "name": name,
-            "full_name": repo,
+            **make_repository(repo, fork=fork, default_branch=default_branch),
+            # Push payloads describe the repository slightly differently
+            # from the REST API.
             "owner": {"name": owner, "login": owner},
-            "private": False,
-            "fork": fork,
-            "default_branch": default_branch,
             "master_branch": default_branch,
             "url": f"https://github.com/{repo}",
-            "contents_url": contents_url,
         },
         "installation": {"id": installation_id},
         "commits": [commit],
@@ -236,12 +279,29 @@ class GitHubMock:
     def __init__(self, httpx_mock: HTTPXMock) -> None:
         self._httpx_mock = httpx_mock
 
+    def mock_installations(self, installation_ids: Iterable[int]) -> None:
+        """Mock one request for the list of installations of the app.
+
+        Parameters
+        ----------
+        installation_ids
+            IDs of the installations, in the order GitHub lists them.
+        """
+        self._httpx_mock.add_response(
+            method="GET",
+            url=f"{GITHUB_API_URL}/app/installations",
+            json=[
+                {"id": installation_id} for installation_id in installation_ids
+            ],
+        )
+
     def mock_installation_token(
         self, installation_id: int = GITHUB_INSTALLATION_ID
     ) -> None:
         """Mock creating access tokens for an installation of the app.
 
-        Any number of tokens may be created, but at least one must be.
+        Any number of tokens may be created, but at least one must be. The
+        token is `get_installation_token` of the installation.
         """
         self._httpx_mock.add_response(
             method="POST",
@@ -251,14 +311,80 @@ class GitHubMock:
             ),
             status_code=201,
             json={
-                "token": "ghs_test-installation-token",
+                "token": get_installation_token(installation_id),
                 "expires_at": "2099-01-01T00:00:00Z",
             },
             is_reusable=True,
         )
 
+    def mock_installation_repositories(
+        self,
+        repositories: list[dict[str, Any]],
+        *,
+        installation_id: int = GITHUB_INSTALLATION_ID,
+    ) -> None:
+        """Mock one request for the repositories an installation can access.
+
+        The response is only served to a client authenticated with the
+        installation's token, so each installation can list different
+        repositories. Mock the token with `mock_installation_token`.
+
+        Parameters
+        ----------
+        repositories
+            Repository resources, such as from `make_repository`.
+        installation_id
+            ID of the installation.
+        """
+        token = get_installation_token(installation_id)
+        self._httpx_mock.add_response(
+            method="GET",
+            url=f"{GITHUB_API_URL}/installation/repositories",
+            match_headers={"authorization": f"token {token}"},
+            json={
+                "total_count": len(repositories),
+                "repositories": repositories,
+            },
+        )
+
+    def mock_directory(
+        self,
+        path: str,
+        names: Iterable[str],
+        *,
+        repo: str = GITHUB_REPO,
+        optional: bool = False,
+    ) -> None:
+        """Mock one request for the listing of a directory.
+
+        Parameters
+        ----------
+        path
+            Path of the directory in the repository.
+        names
+            Names of the files in the directory.
+        repo
+            Full name (``owner/repo``) of the repository.
+        optional
+            Whether the test passes even if the directory is not requested.
+        """
+        self._httpx_mock.add_response(
+            method="GET",
+            url=f"{GITHUB_API_URL}/repos/{repo}/contents/{path}",
+            json=[
+                {"type": "file", "name": name, "path": f"{path}/{name}"}
+                for name in names
+            ],
+            is_optional=optional,
+        )
+
     def mock_file(
-        self, path: str, text: str, *, repo: str = GITHUB_REPO
+        self,
+        path: str,
+        text: str,
+        *,
+        repo: str = GITHUB_REPO,
+        optional: bool = False,
     ) -> None:
         """Mock one request for the raw contents of a file.
 
@@ -273,11 +399,14 @@ class GitHubMock:
             Contents of the file.
         repo
             Full name (``owner/repo``) of the repository.
+        optional
+            Whether the test passes even if the file is not requested.
         """
         self._httpx_mock.add_response(
             method="GET",
             url=f"{GITHUB_API_URL}/repos/{repo}/contents/{path}",
             text=text,
+            is_optional=optional,
         )
 
     def get_requests(self) -> list[httpx.Request]:

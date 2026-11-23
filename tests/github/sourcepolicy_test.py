@@ -89,3 +89,15 @@ def test_missing_full_name() -> None:
     decision = policy.evaluate({"name": "rsp_broadcast", "fork": False})
 
     assert decision.reason == SourceRejectionReason.not_in_allowlist
+
+
+def test_allowed_repos_as_configured() -> None:
+    policy = BroadcastSourcePolicy(
+        repo for repo in ["LSST-SQRE/RSP_Broadcast", "lsst-sqre/other"]
+    )
+
+    assert policy.allowed_repos == [
+        "LSST-SQRE/RSP_Broadcast",
+        "lsst-sqre/other",
+    ]
+    assert policy.evaluate(make_repository("lsst-sqre/other")).allowed

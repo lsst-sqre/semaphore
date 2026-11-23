@@ -22,6 +22,7 @@ from . import __version__
 from .config import config
 from .dependencies.broadcastrepo import broadcast_repo_dependency
 from .github.broadcastservices import bootstrap_broadcast_repo
+from .github.sourcepolicy import BroadcastSourcePolicy
 from .handlers.external import external_router
 from .handlers.internal import internal_router
 from .handlers.v1 import v1_router
@@ -64,6 +65,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await bootstrap_broadcast_repo(
             http_client=await http_client_dependency(),
             broadcast_repo=broadcast_repo,
+            source_policy=BroadcastSourcePolicy.from_config(config),
             logger=logger,
         )
 

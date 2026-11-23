@@ -51,7 +51,7 @@ async def admin_client(app: FastAPI) -> AsyncGenerator[AsyncClient]:
 
 @pytest_asyncio.fixture
 async def app(
-    empty_database: None, monkeypatch: pytest.MonkeyPatch
+    empty_database: None, broadcast_repo: BroadcastMessageRepository
 ) -> AsyncGenerator[FastAPI]:
     """Return a configured test application.
 
@@ -59,11 +59,21 @@ async def app(
     events are sent during test execution. Each test starts with an empty
     broadcast repository.
     """
-    monkeypatch.setattr(
-        broadcast_repo_dependency, "repo", BroadcastMessageRepository()
-    )
     async with LifespanManager(main.app):
         yield main.app
+
+
+@pytest.fixture
+def broadcast_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> BroadcastMessageRepository:
+    """Give the app an empty broadcast repository for the test.
+
+    Returns the repository, so a test can inspect what the app loaded.
+    """
+    repo = BroadcastMessageRepository()
+    monkeypatch.setattr(broadcast_repo_dependency, "repo", repo)
+    return repo
 
 
 @pytest_asyncio.fixture

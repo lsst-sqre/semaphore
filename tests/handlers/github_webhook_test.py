@@ -10,6 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from safir.testing.logging import parse_log_tuples
 
 from semaphore import main
+from semaphore.broadcast.repository import BroadcastMessageRepository
 
 from ..support.constants import TEST_BASE_URL
 from ..support.github import (
@@ -31,6 +32,7 @@ GOODBYE_MD = "---\nsummary: Goodbye from GitHub.\n---\n"
 @pytest_asyncio.fixture
 async def client_without_repos(
     empty_database: None,
+    broadcast_repo: BroadcastMessageRepository,
     github_mock: GitHubMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncGenerator[AsyncClient]:
@@ -78,7 +80,7 @@ async def test_without_repos_webhook(
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("empty_database", "github_mock")
+@pytest.mark.usefixtures("empty_database", "broadcast_repo", "github_mock")
 async def test_without_repos_startup_warning(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
