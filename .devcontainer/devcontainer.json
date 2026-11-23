@@ -1,0 +1,24 @@
+{
+  "name": "semaphore",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": {
+    // The test suite and several nox sessions start PostgreSQL through
+    // testcontainers, which needs a Docker daemon inside the container.
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  // The docker-in-docker init script runs as PID 1 and must be root (and
+  // privileged) to start dockerd. Day-to-day commands still run as vscode.
+  "containerUser": "root",
+  "remoteUser": "vscode",
+  "privileged": true,
+  "postCreateCommand": "make init",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "ms-python.mypy-type-checker"
+      ]
+    }
+  }
+}
