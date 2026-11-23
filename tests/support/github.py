@@ -333,12 +333,18 @@ class GitHubMock:
         repositories: list[dict[str, Any]],
         *,
         installation_id: int = GITHUB_INSTALLATION_ID,
+        per_page: int | None = None,
     ) -> None:
-        """Mock one request for the repositories an installation can access.
+        """Mock listing the repositories an installation can access.
 
-        The response is only served to a client authenticated with the
+        The responses are only served to a client authenticated with the
         installation's token, so each installation can list different
         repositories. Mock the token with `mock_installation_token`.
+
+        The listing is split into pages, each requested once. As GitHub does,
+        the first page is at the bare URL, a later page is at the ``page``
+        query parameter, and each page but the last links to the next one
+        with a ``Link`` header.
 
         Parameters
         ----------
@@ -346,17 +352,32 @@ class GitHubMock:
             Repository resources, such as from `make_repository`.
         installation_id
             ID of the installation.
+        per_page
+            Number of repositories on each page, or `None` to list them all
+            on one page.
         """
         token = get_installation_token(installation_id)
-        self._httpx_mock.add_response(
-            method="GET",
-            url=f"{GITHUB_API_URL}/installation/repositories",
-            match_headers={"authorization": f"token {token}"},
-            json={
-                "total_count": len(repositories),
-                "repositories": repositories,
-            },
-        )
+        url = f"{GITHUB_API_URL}/installation/repositories"
+        size = per_page or max(len(repositories), 1)
+        pages = [
+            repositories[i : i + size]
+            for i in range(0, max(len(repositories), 1), size)
+        ]
+        for number, page in enumerate(pages, start=1):
+            headers = {}
+            if number < len(pages):
+                headers["Link"] = f'<{url}?page={number + 1}>; rel="next"'
+            self._httpx_mock.add_response(
+                method="GET",
+                url=url,
+                match_params={"page": str(number)} if number > 1 else None,
+                match_headers={"authorization": f"token {token}"},
+                headers=headers,
+                json={
+                    "total_count": len(repositories),
+                    "repositories": page,
+                },
+            )
 
     def mock_directory(
         self,
@@ -424,6 +445,27 @@ class GitHubMock:
             match_params={"ref": ref} if ref is not None else None,
             text=text,
             is_optional=optional,
+        )
+
+    def mock_contents_error(
+        self, path: str, *, status_code: int, repo: str = GITHUB_REPO
+    ) -> None:
+        """Mock one request for a file or directory that GitHub fails.
+
+        Parameters
+        ----------
+        path
+            Path of the file or directory in the repository.
+        status_code
+            HTTP status code of GitHub's error response.
+        repo
+            Full name (``owner/repo``) of the repository.
+        """
+        self._httpx_mock.add_response(
+            method="GET",
+            url=f"{GITHUB_API_URL}/repos/{repo}/contents/{path}",
+            status_code=status_code,
+            json={"message": "GitHub error"},
         )
 
     def get_requests(self) -> list[httpx.Request]:

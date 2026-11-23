@@ -297,8 +297,11 @@ async def bootstrap_broadcast_repo(
     Semaphore is a GitHub App that can be installed in specific repositories.
     Of the repositories that its installations can see, only those that
     ``source_policy`` allows are loaded; the others are skipped with a
-    warning, before any of their contents are requested. A summary of what
-    was loaded is logged at the end.
+    warning, before any of their contents are requested. Content in an
+    allowed repository cannot stop startup: a broadcast file that cannot be
+    read or parsed, or a repository whose broadcasts cannot be listed, is
+    skipped with a warning and loading continues. A summary of what was
+    loaded is logged at the end.
 
     Parameters
     ----------
@@ -315,6 +318,7 @@ async def bootstrap_broadcast_repo(
     jwt = get_app_jwt()
     repo_count = 0
     message_count = 0
+    skipped_file_count = 0
     async for installation in iter_installations(
         github_client=github_client, jwt=jwt
     ):
@@ -332,20 +336,38 @@ async def bootstrap_broadcast_repo(
                     reason=decision.reason,
                 )
                 continue
-            repo_count += 1
-            message_count += await _load_repo_broadcasts(
+            result = await _load_repo_broadcasts(
                 github_repo=github_repo,
                 broadcast_repo=broadcast_repo,
                 github_client=installation_client,
                 logger=logger,
             )
+            if result is None:
+                continue
+            repo_count += 1
+            message_count += result.message_count
+            skipped_file_count += result.skipped_file_count
 
     logger.info(
         "Loaded broadcasts from GitHub",
         github_repos=source_policy.allowed_repos,
         repo_count=repo_count,
         message_count=message_count,
+        skipped_file_count=skipped_file_count,
     )
+
+
+@dataclasses.dataclass
+class _RepoLoadResult:
+    """The outcome of loading the broadcast messages in one repository."""
+
+    message_count: int = 0
+    """Number of messages added to the broadcast message repository."""
+
+    skipped_file_count: int = 0
+    """Number of broadcast message files skipped because they could not be
+    loaded.
+    """
 
 
 async def _load_repo_broadcasts(
@@ -354,8 +376,13 @@ async def _load_repo_broadcasts(
     broadcast_repo: BroadcastMessageRepository,
     github_client: GitHubAPI,
     logger: BoundLogger,
-) -> int:
+) -> _RepoLoadResult | None:
     """Load the broadcast messages in a GitHub repository's default branch.
+
+    A file that cannot be loaded, because of a GitHub error or because its
+    content is malformed, is skipped with a warning. If the repository's
+    broadcasts directory cannot be listed, the whole repository is skipped
+    with a warning.
 
     Parameters
     ----------
@@ -371,35 +398,57 @@ async def _load_repo_broadcasts(
 
     Returns
     -------
-    int
-        The number of messages added to the broadcast message repository.
+    _RepoLoadResult or None
+        What was loaded from the repository, or `None` if the repository was
+        skipped.
     """
-    logger.debug("Loading broadcasts from repository", github_repo=github_repo)
-    message_count = 0
-    async for file_obj in iter_repo_dir_contents(
-        github_client=github_client,
-        contents_url=github_repo["contents_url"],
-        directory_path=BROADCASTS_DIR,
-    ):
-        if not is_broadcast_message(file_obj["path"]):
-            continue
+    logger = logger.bind(github_repo=github_repo["full_name"])
+    logger.debug("Loading broadcasts from repository")
+    try:
+        paths = [
+            file_obj["path"]
+            async for file_obj in iter_repo_dir_contents(
+                github_client=github_client,
+                contents_url=github_repo["contents_url"],
+                directory_path=BROADCASTS_DIR,
+            )
+            if is_broadcast_message(file_obj["path"])
+        ]
+    except Exception:
+        logger.warning(
+            "Skipping a repository whose broadcasts could not be listed",
+            exc_info=True,
+        )
+        return None
+
+    result = _RepoLoadResult()
+    for path in paths:
         message_ref = GitHubMessageRef(
-            path=file_obj["path"],
+            path=path,
             repo_name=github_repo["name"],
             repo_owner=github_repo["owner"]["login"],
             ref=f"refs/heads/{github_repo['default_branch']}",
         )
-        message = await add_file_to_repository(
-            file_path=file_obj["path"],
-            message_ref=message_ref,
-            contents_url=github_repo["contents_url"],
-            broadcast_repo=broadcast_repo,
-            github_client=github_client,
-            logger=logger,
-        )
+        try:
+            message = await add_file_to_repository(
+                file_path=path,
+                message_ref=message_ref,
+                contents_url=github_repo["contents_url"],
+                broadcast_repo=broadcast_repo,
+                github_client=github_client,
+                logger=logger,
+            )
+        except Exception:
+            logger.warning(
+                "Skipping a broadcast file that could not be loaded",
+                path=path,
+                exc_info=True,
+            )
+            result.skipped_file_count += 1
+            continue
         if message is not None:
-            message_count += 1
-    return message_count
+            result.message_count += 1
+    return result
 
 
 async def iter_installations(
@@ -432,7 +481,7 @@ async def iter_installation_repositories(
     github_client: GitHubAPI,
 ) -> AsyncGenerator[dict[str, Any]]:
     """Iterate over repositories that the GitHub app installation has access
-    to.
+    to, across every page of the listing.
 
     Parameters
     ----------
@@ -446,12 +495,11 @@ async def iter_installation_repositories(
         The repository resource from the GitHub v3 API. See
         https://docs.github.com/en/rest/reference/apps#list-repositories-accessible-to-the-app-installation
     """
-    # TODO(jsick): we're temporarily getitem instead of getiter because
-    # of https://github.com/brettcannon/gidgethub/issues/164
-    # this means we'll miss any extra pages, but that should be fine for now
-    # given the small number of installations expected (generally 1 repo!).
-    data = await github_client.getitem("/installation/repositories")
-    for repo in data["repositories"]:
+    # Each page is an object that lists its repositories under the
+    # "repositories" key rather than a bare list.
+    async for repo in github_client.getiter(
+        "/installation/repositories", iterable_key="repositories"
+    ):
         yield repo
 
 
