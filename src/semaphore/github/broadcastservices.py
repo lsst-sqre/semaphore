@@ -4,7 +4,7 @@ import dataclasses
 from collections.abc import AsyncGenerator, Sequence
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 import httpx
 from gidgethub import BadRequest, GitHubException, RateLimitExceeded
@@ -27,6 +27,14 @@ from .sourcepolicy import BroadcastSourcePolicy
 BROADCASTS_DIR = "broadcasts"
 """Directory relative to a GitHub repository's root that contains broadcast
 message files.
+"""
+
+_ID_PREFIX = "github.com/"
+"""Prefix of the identifier of a message sourced from GitHub."""
+
+_ID_REF_SEPARATOR = "/?ref="
+"""Separator between the file path and the git ref in the identifier of a
+message sourced from GitHub.
 """
 
 
@@ -59,13 +67,43 @@ class GitHubMessageRef:
             ref=event.data["ref"],
         )
 
+    @classmethod
+    def from_id(cls, identifier: str) -> Self | None:
+        """Parse a message identifier made by `as_id`.
+
+        Parameters
+        ----------
+        identifier
+            A BroadcastMessage.identifier attribute.
+
+        Returns
+        -------
+        GitHubMessageRef or None
+            The reference whose `as_id` is ``identifier``, or `None` if
+            ``identifier`` does not identify a message sourced from GitHub.
+        """
+        if not identifier.startswith(_ID_PREFIX):
+            return None
+        parts = identifier.removeprefix(_ID_PREFIX).split("/", maxsplit=2)
+        if len(parts) != 3:
+            return None
+        repo_owner, repo_name, rest = parts
+        # A git ref cannot contain "?", so the last separator is the one
+        # before the ref.
+        path, separator, ref = rest.rpartition(_ID_REF_SEPARATOR)
+        if not (repo_owner and repo_name and path and separator and ref):
+            return None
+        return cls(
+            path=path, repo_name=repo_name, repo_owner=repo_owner, ref=ref
+        )
+
     def as_id(self) -> str:
         """Convert to a string format for use as a BroadcastMessage.identifier
         attribute.
         """
         return (
-            f"github.com/{self.repo_owner}/{self.repo_name}/{self.path}/"
-            f"?ref={self.ref}"
+            f"{_ID_PREFIX}{self.repo_owner}/{self.repo_name}/{self.path}"
+            f"{_ID_REF_SEPARATOR}{self.ref}"
         )
 
     def as_dict(self) -> dict[str, str]:
@@ -73,6 +111,46 @@ class GitHubMessageRef:
         logging context.
         """
         return dataclasses.asdict(self)
+
+    def is_in_repo(self, repo_full_name: str) -> bool:
+        """Determine if the message is sourced from a GitHub repository.
+
+        Parameters
+        ----------
+        repo_full_name
+            Full name (``owner/repo``) of the repository, matched
+            case-insensitively as GitHub matches repository names.
+        """
+        full_name = f"{self.repo_owner}/{self.repo_name}"
+        return full_name.lower() == repo_full_name.lower()
+
+
+def get_repo_message_refs(
+    *, broadcast_repo: BroadcastMessageRepository, repo_full_name: str
+) -> list[GitHubMessageRef]:
+    """Get the references of the stored messages that are sourced from one
+    GitHub repository, under any git ref.
+
+    Parameters
+    ----------
+    broadcast_repo
+        The broadcast message repository.
+    repo_full_name
+        Full name (``owner/repo``) of the repository, matched
+        case-insensitively.
+
+    Returns
+    -------
+    list of GitHubMessageRef
+        References of the repository's messages. The `~GitHubMessageRef.as_id`
+        of each is the identifier of a stored message.
+    """
+    message_refs = []
+    for message in broadcast_repo.iter():
+        message_ref = GitHubMessageRef.from_id(message.identifier)
+        if message_ref is not None and message_ref.is_in_repo(repo_full_name):
+            message_refs.append(message_ref)
+    return message_refs
 
 
 async def update_broadcast_repo_from_push_event(
@@ -86,15 +164,28 @@ async def update_broadcast_repo_from_push_event(
     """Update messages in the repository based on a GitHub webhook for the
     push event to a repository's default branch.
 
-    The push's commits determine which broadcast files it touched (added,
-    modified or removed). Each of those files is reconciled with the
-    default branch as it is when the push is processed, rather than as the
-    push left it: the branch's head commit is looked up once, and every file
-    is read at that commit. A file that exists there is added or updated,
-    and a file that does not is removed. So a push that GitHub redelivers,
-    or that arrives after a later push, cannot revert a message or bring
-    back a removed one. For a push that is still the branch's head, the head
-    is the push's ``after`` commit.
+    The pushed repository's messages are reconciled with the default branch
+    as it is when the push is processed, rather than as the push left it:
+    the branch's head commit is looked up once, and every file is read at
+    that commit. So a push that GitHub redelivers, or that arrives after a
+    later push, cannot revert a message or bring back a removed one. For a
+    push that is still the branch's head, the head is the push's ``after``
+    commit.
+
+    Usually, only the broadcast files that the push's commits touched
+    (added, modified or removed) are reconciled. A file that exists at the
+    head is added or updated, and a file that does not is removed. A push
+    that touches no broadcast file makes no request to GitHub.
+
+    The commits cannot show every change in two cases, so the repository is
+    reloaded in full instead (see `_reload_repo_broadcasts`):
+
+    - A force push, whose commits do not list the files of the history it
+      discarded.
+    - A push to a ref other than the one that some of the repository's
+      messages were loaded from, as after the default branch is changed or
+      renamed. Message identifiers include the ref, so the messages from the
+      old ref would otherwise never be updated or removed.
 
     The repository's lock is held throughout, so pushes for one repository
     are processed one at a time. If the head cannot be looked up, the push
@@ -126,11 +217,16 @@ async def update_broadcast_repo_from_push_event(
     )
 
     paths = sorted(filter(is_broadcast_message, files_written | files_removed))
-    if not paths:
-        return
-
     repository = event.data["repository"]
     async with repo_locks.get(repository["full_name"]):
+        # Decided under the lock, since another push for the repository may
+        # change its stored messages.
+        reload_reason = _get_reload_reason(
+            event=event, broadcast_repo=broadcast_repo
+        )
+        if reload_reason is None and not paths:
+            return
+
         try:
             head_sha = await get_branch_head_sha(
                 github_client=github_client,
@@ -152,6 +248,22 @@ async def update_broadcast_repo_from_push_event(
             after_sha=event.data["after"],
         )
 
+        if reload_reason is not None:
+            logger.info(
+                "Reloading all broadcasts of the repository",
+                github_repo=repository["full_name"],
+                reason=reload_reason,
+                head_sha=head_sha,
+            )
+            await _reload_repo_broadcasts(
+                event=event,
+                head_sha=head_sha,
+                broadcast_repo=broadcast_repo,
+                github_client=github_client,
+                logger=logger,
+            )
+            return
+
         for path in paths:
             await _reconcile_file_at_commit(
                 file_path=path,
@@ -163,6 +275,120 @@ async def update_broadcast_repo_from_push_event(
                 broadcast_repo=broadcast_repo,
                 github_client=github_client,
                 logger=logger,
+            )
+
+
+def _get_reload_reason(
+    *, event: Event, broadcast_repo: BroadcastMessageRepository
+) -> Literal["forced_push", "ref_changed"] | None:
+    """Determine whether a push to a repository's default branch needs the
+    repository's broadcasts to be reloaded in full, rather than only the
+    files that its commits touched.
+
+    Parameters
+    ----------
+    event
+        The parsed event payload.
+    broadcast_repo
+        The broadcast message repository.
+
+    Returns
+    -------
+    str or None
+        Why the repository needs reloading (``forced_push`` or
+        ``ref_changed``), or `None` if it does not.
+    """
+    if event.data.get("forced"):
+        return "forced_push"
+    message_refs = get_repo_message_refs(
+        broadcast_repo=broadcast_repo,
+        repo_full_name=event.data["repository"]["full_name"],
+    )
+    if any(m.ref != event.data["ref"] for m in message_refs):
+        return "ref_changed"
+    return None
+
+
+async def _reload_repo_broadcasts(
+    *,
+    event: Event,
+    head_sha: str,
+    broadcast_repo: BroadcastMessageRepository,
+    github_client: GitHubAPI,
+    logger: BoundLogger,
+) -> None:
+    """Make the stored messages of a pushed repository match the broadcast
+    files of its default branch at a commit.
+
+    The repository's broadcasts directory is listed at the commit, and each
+    broadcast file in it is reconciled with the commit (see
+    `_reconcile_file_at_commit`). Then every other stored message of the
+    repository is removed, which includes every message stored under a ref
+    other than the pushed one. A file that GitHub fails to return (other
+    than with a 404) keeps its message under the pushed ref, if it has one.
+
+    If the directory does not exist at the commit, the repository has no
+    broadcasts and all of its messages are removed. If GitHub fails to list
+    the directory for another reason, the push is ignored with an error log
+    and the stored messages are kept.
+
+    Parameters
+    ----------
+    event
+        The parsed event payload.
+    head_sha
+        Commit SHA of the default branch's head, to read the files at.
+    broadcast_repo
+        The broadcast message repository.
+    github_client
+        The GitHub API client, pre-authorized as an app installation.
+    logger
+        The logger instance
+    """
+    repository = event.data["repository"]
+    try:
+        paths = await _list_broadcast_paths(
+            github_client=github_client,
+            contents_url=repository["contents_url"],
+            git_ref=head_sha,
+        )
+    except Exception as e:
+        if isinstance(e, BadRequest) and e.status_code == HTTPStatus.NOT_FOUND:
+            # The broadcasts directory does not exist at the commit.
+            paths = []
+        else:
+            logger.exception(
+                "Could not list the repository's broadcasts, ignoring the "
+                "push",
+                github_repo=repository["full_name"],
+                error=str(e),
+            )
+            return
+
+    listed_ids = set()
+    for path in paths:
+        message_ref = GitHubMessageRef.from_push_event(path=path, event=event)
+        listed_ids.add(message_ref.as_id())
+        await _reconcile_file_at_commit(
+            file_path=path,
+            message_ref=message_ref,
+            contents_url=repository["contents_url"],
+            git_ref=head_sha,
+            broadcast_repo=broadcast_repo,
+            github_client=github_client,
+            logger=logger,
+        )
+
+    for message_ref in get_repo_message_refs(
+        broadcast_repo=broadcast_repo, repo_full_name=repository["full_name"]
+    ):
+        message_id = message_ref.as_id()
+        if message_id not in listed_ids:
+            broadcast_repo.remove(message_id)
+            logger.debug(
+                "Removed message that is not in the default branch",
+                message_id=message_id,
+                git_ref=head_sha,
             )
 
 
@@ -542,15 +768,10 @@ async def _load_repo_broadcasts(
     logger = logger.bind(github_repo=github_repo["full_name"])
     logger.debug("Loading broadcasts from repository")
     try:
-        paths = [
-            file_obj["path"]
-            async for file_obj in iter_repo_dir_contents(
-                github_client=github_client,
-                contents_url=github_repo["contents_url"],
-                directory_path=BROADCASTS_DIR,
-            )
-            if is_broadcast_message(file_obj["path"])
-        ]
+        paths = await _list_broadcast_paths(
+            github_client=github_client,
+            contents_url=github_repo["contents_url"],
+        )
     except Exception:
         logger.warning(
             "Skipping a repository whose broadcasts could not be listed",
@@ -586,6 +807,51 @@ async def _load_repo_broadcasts(
         if message is not None:
             result.message_count += 1
     return result
+
+
+async def _list_broadcast_paths(
+    *,
+    github_client: GitHubAPI,
+    contents_url: str,
+    git_ref: str | None = None,
+) -> list[str]:
+    """List the paths of the broadcast message files in a GitHub
+    repository.
+
+    Parameters
+    ----------
+    github_client
+        The GitHub API client, pre-authorized as an app installation that
+        can see the repository.
+    contents_url
+        The URI template for the repository's contents.
+    git_ref
+        The git ref (commit SHA, branch, or tag) to list the files at. If
+        `None`, the files are listed from the repository's default branch as
+        it is at the time of the request.
+
+    Returns
+    -------
+    list of str
+        Posix paths of the broadcast message files, in the order GitHub lists
+        them.
+
+    Raises
+    ------
+    GitHubException
+        Raised if there is an issue with GitHub, including a 404 (as
+        `~gidgethub.BadRequest`) if the broadcasts directory does not exist.
+    """
+    return [
+        file_obj["path"]
+        async for file_obj in iter_repo_dir_contents(
+            github_client=github_client,
+            contents_url=contents_url,
+            directory_path=BROADCASTS_DIR,
+            git_ref=git_ref,
+        )
+        if is_broadcast_message(file_obj["path"])
+    ]
 
 
 async def iter_installations(
@@ -641,7 +907,10 @@ async def iter_installation_repositories(
 
 
 async def iter_repo_dir_contents(
-    github_client: GitHubAPI, contents_url: str, directory_path: str
+    github_client: GitHubAPI,
+    contents_url: str,
+    directory_path: str,
+    git_ref: str | None = None,
 ) -> AsyncGenerator[dict[str, Any]]:
     """Iterate over content objects in a repository in a GitHub repository.
 
@@ -656,6 +925,10 @@ async def iter_repo_dir_contents(
         ``https://api.github.com/repos/lsst-sqre/semaphore-demo/contents/{+path}``
     directory_path
         The directory path to iterate in.
+    git_ref
+        The git ref (commit SHA, branch, or tag) to list the directory at. If
+        `None`, the directory is listed from the repository's default branch
+        as it is at the time of the request.
 
     Yields
     ------
@@ -667,6 +940,9 @@ async def iter_repo_dir_contents(
         directory_path = directory_path.rstrip("/")
 
     async for file_obj in github_client.getiter(
-        contents_url, url_vars={"path": directory_path}
+        # As in add_file_to_repository, the ref is a query parameter, which
+        # is omitted from the expanded URL if it is None.
+        contents_url + "{?ref}",
+        url_vars={"path": directory_path, "ref": git_ref},
     ):
         yield file_obj

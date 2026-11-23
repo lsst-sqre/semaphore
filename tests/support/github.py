@@ -174,6 +174,7 @@ def make_push_payload(
     before: str = DEFAULT_BEFORE_SHA,
     after: str = DEFAULT_AFTER_SHA,
     deleted: bool = False,
+    forced: bool = False,
     added: list[str] | None = None,
     modified: list[str] | None = None,
     removed: list[str] | None = None,
@@ -201,6 +202,9 @@ def make_push_payload(
     deleted
         Whether the push deletes the ref. GitHub also sets ``after`` to
         `NULL_SHA` for such a push.
+    forced
+        Whether the push is a force push, which may discard commits that
+        were on the ref.
     added
         Paths of files the commit adds.
     modified
@@ -229,7 +233,7 @@ def make_push_payload(
         "after": after,
         "created": False,
         "deleted": deleted,
-        "forced": False,
+        "forced": forced,
         "repository": {
             **make_repository(repo, fork=fork, default_branch=default_branch),
             # Push payloads describe the repository slightly differently
@@ -487,6 +491,7 @@ class GitHubMock:
         names: Iterable[str],
         *,
         repo: str = GITHUB_REPO,
+        ref: str | None = None,
         optional: bool = False,
     ) -> None:
         """Mock one request for the listing of a directory.
@@ -499,12 +504,17 @@ class GitHubMock:
             Names of the files in the directory.
         repo
             Full name (``owner/repo``) of the repository.
+        ref
+            Git ref that the directory must be listed at, through the ``ref``
+            query parameter, or `None` if the request must not set a ref
+            (listing the default branch).
         optional
             Whether the test passes even if the directory is not requested.
         """
         self._httpx_mock.add_response(
             method="GET",
             url=f"{GITHUB_API_URL}/repos/{repo}/contents/{path}",
+            match_params={"ref": ref} if ref is not None else None,
             json=[
                 {"type": "file", "name": name, "path": f"{path}/{name}"}
                 for name in names

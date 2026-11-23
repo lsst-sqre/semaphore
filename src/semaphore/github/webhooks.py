@@ -44,7 +44,9 @@ async def handle_push_event(
     a warning, before any request is made to GitHub. Pushes that delete a
     ref, or that are not to the repository's default branch, are also
     ignored. The broadcast files that a push touches are reconciled with the
-    default branch's current head, one push per repository at a time (see
+    default branch's current head, one push per repository at a time. After
+    a force push or a change of default branch, all of the repository's
+    broadcasts are reloaded instead (see
     `update_broadcast_repo_from_push_event`).
 
     Parameters

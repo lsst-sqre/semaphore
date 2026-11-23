@@ -44,6 +44,9 @@ SHA_A = "aaaa" + "0" * 36
 SHA_B = "bbbb" + "0" * 36
 """Commit SHA that a second test push moves its branch to."""
 
+SHA_C = "cccc" + "0" * 36
+"""Commit SHA that a third test push moves its branch to."""
+
 SECOND_REPO = "lsst-sqre/rsp_broadcast_extra"
 """A second repository that tests may add to the allowlist."""
 
@@ -72,6 +75,11 @@ async def get_broadcasts(client: AsyncClient) -> list[dict[str, Any]]:
     return response.json()
 
 
+async def get_summaries(client: AsyncClient) -> dict[str, str]:
+    """Return the summary of each served broadcast, by identifier."""
+    return {b["id"]: b["summary"]["gfm"] for b in await get_broadcasts(client)}
+
+
 def get_warnings(caplog: pytest.LogCaptureFixture) -> list[dict[str, Any]]:
     logs = parse_log_tuples("semaphore", caplog.record_tuples)
     return [log for log in logs if log["severity"] == "warning"]
@@ -87,6 +95,18 @@ def get_contents_requests(github_mock: GitHubMock) -> list[Request]:
     return [
         r for r in github_mock.get_requests() if "/contents/" in r.url.path
     ]
+
+
+def mock_main_branch_broadcasts(github_mock: GitHubMock) -> dict[str, Any]:
+    """Mock reading the files of a push to ``main``, the default branch,
+    that adds ``a.md`` and ``b.md`` at `SHA_A`, and return its payload.
+    """
+    github_mock.mock_branch_head(SHA_A)
+    github_mock.mock_file("broadcasts/a.md", HELLO_MD, ref=SHA_A)
+    github_mock.mock_file("broadcasts/b.md", HELLO_MD, ref=SHA_A)
+    return make_push_payload(
+        after=SHA_A, added=["broadcasts/a.md", "broadcasts/b.md"]
+    )
 
 
 @pytest.mark.asyncio
@@ -499,6 +519,332 @@ async def test_redelivered_removal_after_readd(
         make_message_id("broadcasts/hello.md")
     ]
     assert broadcasts[0]["summary"]["gfm"] == "Goodbye from GitHub."
+
+
+@pytest.mark.asyncio
+async def test_push_reads_only_touched_files(
+    github_app_client: AsyncClient, github_mock: GitHubMock
+) -> None:
+    """A push that is not forced, to the ref that the stored broadcasts came
+    from, reads only the head and the files it touches, without listing the
+    broadcasts.
+    """
+    github_mock.mock_installation_token()
+    add = mock_main_branch_broadcasts(github_mock)
+    github_mock.mock_branch_head(SHA_B)
+    github_mock.mock_file("broadcasts/a.md", GOODBYE_MD, ref=SHA_B)
+    await post_github_webhook(github_app_client, "push", add)
+    request_count = len(github_mock.get_requests())
+    modify = make_push_payload(
+        before=SHA_A, after=SHA_B, modified=["broadcasts/a.md"]
+    )
+
+    response = await post_github_webhook(github_app_client, "push", modify)
+
+    assert response.status_code == 202
+    github_paths = [
+        r.url.path
+        for r in github_mock.get_requests()[request_count:]
+        if r.method == "GET"
+    ]
+    repo_path = f"/repos/{GITHUB_REPO}"
+    assert github_paths == [
+        f"{repo_path}/git/ref/heads/main",
+        f"{repo_path}/contents/broadcasts/a.md",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_forced_push_reloads_repo(
+    github_app_client: AsyncClient, github_mock: GitHubMock
+) -> None:
+    """A force push replaces the repository's broadcasts with those in the
+    new history, including removing a file that only the discarded history
+    had.
+    """
+    github_mock.mock_installation_token()
+    github_mock.mock_branch_head(SHA_A)
+    github_mock.mock_file("broadcasts/x.md", HELLO_MD, ref=SHA_A)
+    github_mock.mock_file("broadcasts/y.md", HELLO_MD, ref=SHA_A)
+    github_mock.mock_branch_head(SHA_B)
+    github_mock.mock_directory("broadcasts", ["y.md"], ref=SHA_B)
+    github_mock.mock_file("broadcasts/y.md", GOODBYE_MD, ref=SHA_B)
+    add = make_push_payload(
+        after=SHA_A, added=["broadcasts/x.md", "broadcasts/y.md"]
+    )
+    await post_github_webhook(github_app_client, "push", add)
+    # The new history's commits list neither file.
+    force = make_push_payload(
+        before=SHA_A, after=SHA_B, forced=True, modified=["README.md"]
+    )
+
+    response = await post_github_webhook(github_app_client, "push", force)
+
+    assert response.status_code == 202
+    assert await get_summaries(github_app_client) == {
+        make_message_id("broadcasts/y.md"): "Goodbye from GitHub."
+    }
+
+
+@pytest.mark.asyncio
+async def test_forced_push_with_github_error_on_file(
+    github_app_client: AsyncClient, github_mock: GitHubMock
+) -> None:
+    """A GitHub error on a listed file keeps its stored message, while the
+    other listed files are still reloaded.
+    """
+    github_mock.mock_installation_token()
+    add = mock_main_branch_broadcasts(github_mock)
+    github_mock.mock_branch_head(SHA_B)
+    github_mock.mock_directory("broadcasts", ["a.md", "b.md"], ref=SHA_B)
+    github_mock.mock_contents_error(
+        "broadcasts/a.md", status_code=502, ref=SHA_B
+    )
+    github_mock.mock_file("broadcasts/b.md", GOODBYE_MD, ref=SHA_B)
+    await post_github_webhook(github_app_client, "push", add)
+    force = make_push_payload(before=SHA_A, after=SHA_B, forced=True)
+
+    response = await post_github_webhook(github_app_client, "push", force)
+
+    assert response.status_code == 202
+    assert await get_summaries(github_app_client) == {
+        make_message_id("broadcasts/a.md"): "Hello from GitHub.",
+        make_message_id("broadcasts/b.md"): "Goodbye from GitHub.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_forced_push_without_broadcasts_dir(
+    github_app_client: AsyncClient, github_mock: GitHubMock
+) -> None:
+    """A force push to a history without a broadcasts directory removes all
+    of the repository's broadcasts.
+    """
+    github_mock.mock_installation_token()
+    add = mock_main_branch_broadcasts(github_mock)
+    github_mock.mock_branch_head(SHA_B)
+    github_mock.mock_contents_error("broadcasts", status_code=404, ref=SHA_B)
+    await post_github_webhook(github_app_client, "push", add)
+    force = make_push_payload(before=SHA_A, after=SHA_B, forced=True)
+
+    response = await post_github_webhook(github_app_client, "push", force)
+
+    assert response.status_code == 202
+    assert await get_broadcasts(github_app_client) == []
+
+
+@pytest.mark.asyncio
+async def test_forced_push_with_github_error_on_listing(
+    github_app_client: AsyncClient,
+    github_mock: GitHubMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """If GitHub fails to list the broadcasts, the force push is ignored with
+    an error log and the stored broadcasts are kept.
+    """
+    github_mock.mock_installation_token()
+    add = mock_main_branch_broadcasts(github_mock)
+    github_mock.mock_branch_head(SHA_B)
+    github_mock.mock_contents_error("broadcasts", status_code=503, ref=SHA_B)
+    await post_github_webhook(github_app_client, "push", add)
+    force = make_push_payload(before=SHA_A, after=SHA_B, forced=True)
+
+    response = await post_github_webhook(github_app_client, "push", force)
+
+    assert response.status_code == 202
+    assert len(await get_broadcasts(github_app_client)) == 2
+    logs = parse_log_tuples("semaphore", caplog.record_tuples)
+    errors = [log for log in logs if log["severity"] == "error"]
+    assert [e["event"] for e in errors] == [
+        "Could not list the repository's broadcasts, ignoring the push"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_forced_push_keeps_other_repos(
+    github_app_client: AsyncClient,
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reloading a repository leaves the broadcasts of other repositories as
+    they are.
+    """
+    configure_github_app(monkeypatch, repos=f"{GITHUB_REPO},{SECOND_REPO}")
+    github_mock.mock_installation_token()
+    github_mock.mock_branch_head(SHA_A, repo=SECOND_REPO)
+    github_mock.mock_file(
+        "broadcasts/a.md", HELLO_MD, repo=SECOND_REPO, ref=SHA_A
+    )
+    github_mock.mock_branch_head(SHA_A)
+    github_mock.mock_file("broadcasts/a.md", HELLO_MD, ref=SHA_A)
+    github_mock.mock_branch_head(SHA_B)
+    github_mock.mock_directory("broadcasts", ["README.md"], ref=SHA_B)
+    for repo in (SECOND_REPO, GITHUB_REPO):
+        add = make_push_payload(
+            repo=repo, after=SHA_A, added=["broadcasts/a.md"]
+        )
+        await post_github_webhook(github_app_client, "push", add)
+    force = make_push_payload(
+        before=SHA_A, after=SHA_B, forced=True, removed=["broadcasts/a.md"]
+    )
+
+    response = await post_github_webhook(github_app_client, "push", force)
+
+    assert response.status_code == 202
+    broadcasts = await get_broadcasts(github_app_client)
+    assert [b["id"] for b in broadcasts] == [
+        make_message_id("broadcasts/a.md", repo=SECOND_REPO)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_push_ignores_refs_of_other_repos(
+    github_app_client: AsyncClient,
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Broadcasts of another repository from a different branch do not make
+    a push reload its repository.
+    """
+    configure_github_app(monkeypatch, repos=f"{GITHUB_REPO},{SECOND_REPO}")
+    github_mock.mock_installation_token()
+    github_mock.mock_branch_head(SHA_A, repo=SECOND_REPO)
+    github_mock.mock_file(
+        "broadcasts/a.md", HELLO_MD, repo=SECOND_REPO, ref=SHA_A
+    )
+    github_mock.mock_branch_head(SHA_B, branch="trunk")
+    github_mock.mock_file("broadcasts/b.md", HELLO_MD, ref=SHA_B)
+    other = make_push_payload(
+        repo=SECOND_REPO, after=SHA_A, added=["broadcasts/a.md"]
+    )
+    await post_github_webhook(github_app_client, "push", other)
+    push = make_push_payload(
+        ref="refs/heads/trunk",
+        default_branch="trunk",
+        after=SHA_B,
+        added=["broadcasts/b.md"],
+    )
+
+    response = await post_github_webhook(github_app_client, "push", push)
+
+    assert response.status_code == 202
+    assert {b["id"] for b in await get_broadcasts(github_app_client)} == {
+        make_message_id("broadcasts/a.md", repo=SECOND_REPO),
+        make_message_id("broadcasts/b.md", ref="refs/heads/trunk"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_push_after_default_branch_change(
+    github_app_client: AsyncClient, github_mock: GitHubMock
+) -> None:
+    """After the default branch changes from ``main`` to ``trunk``, a push
+    to ``trunk`` replaces the broadcasts loaded from ``main``.
+    """
+    github_mock.mock_installation_token()
+    add = mock_main_branch_broadcasts(github_mock)
+    github_mock.mock_branch_head(SHA_B, branch="trunk")
+    github_mock.mock_directory("broadcasts", ["a.md", "b.md"], ref=SHA_B)
+    github_mock.mock_file("broadcasts/a.md", GOODBYE_MD, ref=SHA_B)
+    github_mock.mock_file("broadcasts/b.md", HELLO_MD, ref=SHA_B)
+    await post_github_webhook(github_app_client, "push", add)
+    push = make_push_payload(
+        ref="refs/heads/trunk",
+        default_branch="trunk",
+        before=SHA_A,
+        after=SHA_B,
+        modified=["broadcasts/a.md"],
+    )
+
+    response = await post_github_webhook(github_app_client, "push", push)
+
+    assert response.status_code == 202
+    assert await get_summaries(github_app_client) == {
+        make_message_id(
+            "broadcasts/a.md", ref="refs/heads/trunk"
+        ): "Goodbye from GitHub.",
+        make_message_id(
+            "broadcasts/b.md", ref="refs/heads/trunk"
+        ): "Hello from GitHub.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_default_branch_change_with_github_error_on_file(
+    github_app_client: AsyncClient, github_mock: GitHubMock
+) -> None:
+    """A broadcast from the old default branch is removed even if GitHub
+    fails to return its file from the new one, so that no broadcast is left
+    under the old branch.
+    """
+    github_mock.mock_installation_token()
+    add = mock_main_branch_broadcasts(github_mock)
+    github_mock.mock_branch_head(SHA_B, branch="trunk")
+    github_mock.mock_directory("broadcasts", ["a.md", "b.md"], ref=SHA_B)
+    github_mock.mock_contents_error(
+        "broadcasts/a.md", status_code=502, ref=SHA_B
+    )
+    github_mock.mock_file("broadcasts/b.md", HELLO_MD, ref=SHA_B)
+    await post_github_webhook(github_app_client, "push", add)
+    push = make_push_payload(
+        ref="refs/heads/trunk",
+        default_branch="trunk",
+        before=SHA_A,
+        after=SHA_B,
+        modified=["README.md"],
+    )
+
+    response = await post_github_webhook(github_app_client, "push", push)
+
+    assert response.status_code == 202
+    broadcasts = await get_broadcasts(github_app_client)
+    assert [b["id"] for b in broadcasts] == [
+        make_message_id("broadcasts/b.md", ref="refs/heads/trunk")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_removal_after_default_branch_change(
+    github_app_client: AsyncClient, github_mock: GitHubMock
+) -> None:
+    """After a push to the new default branch replaces the broadcasts loaded
+    from the old one, removing a file from the new branch removes its
+    broadcast.
+    """
+    github_mock.mock_installation_token()
+    add = mock_main_branch_broadcasts(github_mock)
+    github_mock.mock_branch_head(SHA_B, branch="trunk")
+    github_mock.mock_directory("broadcasts", ["a.md", "b.md"], ref=SHA_B)
+    github_mock.mock_file("broadcasts/a.md", HELLO_MD, ref=SHA_B)
+    github_mock.mock_file("broadcasts/b.md", HELLO_MD, ref=SHA_B)
+    github_mock.mock_branch_head(SHA_C, branch="trunk")
+    github_mock.mock_contents_error(
+        "broadcasts/b.md", status_code=404, ref=SHA_C
+    )
+    await post_github_webhook(github_app_client, "push", add)
+    modify = make_push_payload(
+        ref="refs/heads/trunk",
+        default_branch="trunk",
+        before=SHA_A,
+        after=SHA_B,
+        modified=["broadcasts/a.md"],
+    )
+    await post_github_webhook(github_app_client, "push", modify)
+    remove = make_push_payload(
+        ref="refs/heads/trunk",
+        default_branch="trunk",
+        before=SHA_B,
+        after=SHA_C,
+        removed=["broadcasts/b.md"],
+    )
+
+    response = await post_github_webhook(github_app_client, "push", remove)
+
+    assert response.status_code == 202
+    broadcasts = await get_broadcasts(github_app_client)
+    assert [b["id"] for b in broadcasts] == [
+        make_message_id("broadcasts/a.md", ref="refs/heads/trunk")
+    ]
 
 
 @pytest.mark.asyncio
