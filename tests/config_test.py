@@ -47,16 +47,36 @@ def test_github_repos_whitespace(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.usefixtures("github_app_env")
+def test_github_repos_owner_with_underscore(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Enterprise Managed User logins, such as ``mona_acme``, contain an
+    underscore.
+    """
+    monkeypatch.setenv("SEMAPHORE_GITHUB_REPOS", "mona_acme/broadcasts")
+
+    config = Config()
+
+    assert config.github_repos == ["mona_acme/broadcasts"]
+    assert config.enable_github_app is True
+
+
+@pytest.mark.usefixtures("github_app_env")
 @pytest.mark.parametrize(
     "entry",
     [
         "lsst-sqre",
         "lsst-sqre/*",
+        "*/rsp_broadcast",
+        "mona_*/broadcasts",
+        "a/b/c",
         "lsst-sqre/rsp_broadcast/extra",
         "https://github.com/lsst-sqre/rsp_broadcast",
         "/rsp_broadcast",
         "lsst-sqre/",
         "lsst sqre/rsp_broadcast",
+        "lsst-sqre/rsp broadcast",
+        "mona_acme\t/broadcasts",
     ],
 )
 def test_github_repos_invalid_entry(

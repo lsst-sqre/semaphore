@@ -16,8 +16,12 @@ from safir.pydantic import EnvAsyncPostgresDsn
 
 __all__ = ["Config", "config"]
 
-_GITHUB_REPO_PATTERN = re.compile(r"^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$")
-"""Pattern for a GitHub repository full name, ``owner/repo``."""
+_GITHUB_REPO_PATTERN = re.compile(r"^[A-Za-z0-9_-]+/[A-Za-z0-9._-]+$")
+"""Pattern for a GitHub repository full name, ``owner/repo``.
+
+The owner allows underscores because Enterprise Managed User logins, such as
+``mona_acme``, contain one.
+"""
 
 
 class Config(BaseSettings):
