@@ -9,6 +9,7 @@ import structlog
 from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from pytest_httpx import HTTPXMock
 from safir.database import (
     create_database_engine,
     initialize_database,
@@ -18,10 +19,14 @@ from safir.testing.data import Data
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from semaphore import main
+from semaphore.broadcast.repository import BroadcastMessageRepository
 from semaphore.config import config
+from semaphore.dependencies.broadcastrepo import broadcast_repo_dependency
+from semaphore.github import webhooks
 from semaphore.schema import SchemaBase
 
 from .support.constants import TEST_BASE_URL
+from .support.github import GitHubMock, configure_github_app
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -45,12 +50,18 @@ async def admin_client(app: FastAPI) -> AsyncGenerator[AsyncClient]:
 
 
 @pytest_asyncio.fixture
-async def app(empty_database: None) -> AsyncGenerator[FastAPI]:
+async def app(
+    empty_database: None, monkeypatch: pytest.MonkeyPatch
+) -> AsyncGenerator[FastAPI]:
     """Return a configured test application.
 
     Wraps the application in a lifespan manager so that startup and shutdown
-    events are sent during test execution.
+    events are sent during test execution. Each test starts with an empty
+    broadcast repository.
     """
+    monkeypatch.setattr(
+        broadcast_repo_dependency, "repo", BroadcastMessageRepository()
+    )
     async with LifespanManager(main.app):
         yield main.app
 
@@ -86,6 +97,34 @@ async def engine() -> AsyncGenerator[AsyncEngine]:
     )
     yield engine
     await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def github_app_client(
+    app: FastAPI, github_mock: GitHubMock, monkeypatch: pytest.MonkeyPatch
+) -> AsyncGenerator[AsyncClient]:
+    """Client for the app with the GitHub App enabled.
+
+    The allowlist is `tests.support.github.GITHUB_REPO`. The GitHub App is
+    enabled after the app starts, so the startup bootstrap from GitHub does
+    not run. Webhooks are processed without the delay that lets GitHub reach
+    consistency.
+    """
+    configure_github_app(monkeypatch)
+    monkeypatch.setattr(webhooks, "GITHUB_CONSISTENCY_DELAY", 0)
+    async with AsyncClient(
+        transport=ASGITransport(app), base_url=TEST_BASE_URL
+    ) as client:
+        yield client
+
+
+@pytest.fixture
+def github_mock(httpx_mock: HTTPXMock) -> GitHubMock:
+    """Mock the GitHub API.
+
+    Any request to GitHub that the test does not mock fails the test.
+    """
+    return GitHubMock(httpx_mock)
 
 
 @pytest_asyncio.fixture

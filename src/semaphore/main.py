@@ -56,6 +56,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Initialize the broadcast GitHub repository.
     broadcast_repo = await broadcast_repo_dependency()
+    if config.github_app_disabled_reason:
+        logger.warning(
+            "GitHub App is disabled", reason=config.github_app_disabled_reason
+        )
     if config.enable_github_app:
         await bootstrap_broadcast_repo(
             http_client=await http_client_dependency(),

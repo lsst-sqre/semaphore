@@ -1,6 +1,5 @@
 """Handlers for the app's external root, ``/semaphore/``."""
 
-import asyncio
 from typing import Annotated
 
 import httpx
@@ -15,7 +14,7 @@ from structlog.stdlib import BoundLogger
 from ...broadcast.repository import BroadcastMessageRepository
 from ...config import config
 from ...dependencies.broadcastrepo import broadcast_repo_dependency
-from ...github.client import create_github_installation_client
+from ...github.sourcepolicy import BroadcastSourcePolicy
 from ...github.webhooks import router as webhook_router
 from .models import Index
 
@@ -109,19 +108,14 @@ async def post_github_webhook(
             "Did not find installation.id in the webhook event payload",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-    github_client = await create_github_installation_client(
-        http_client=http_client, installation_id=installation_id
-    )
-    # Give GitHub some time to reach internal consistency.
-    await asyncio.sleep(1)
-    await webhook_router.dispatch(event, broadcast_repo, github_client, logger)
-
-    logger.debug(
-        "GH requests remaining",
-        remaining=(
-            github_client.rate_limit.remaining
-            if github_client.rate_limit is not None
-            else "unknown"
-        ),
+    # Handlers create their own GitHub client, so that they can check the
+    # event's repository against the source policy before calling GitHub.
+    await webhook_router.dispatch(
+        event,
+        broadcast_repo=broadcast_repo,
+        http_client=http_client,
+        installation_id=installation_id,
+        source_policy=BroadcastSourcePolicy.from_config(config),
+        logger=logger,
     )
     return Response(status_code=status.HTTP_202_ACCEPTED)
