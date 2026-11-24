@@ -22,10 +22,11 @@ from safir.slack.webhook import SlackRouteErrorHandler
 from . import __version__
 from .config import config
 from .dependencies.broadcastrepo import broadcast_repo_dependency
+from .dependencies.reloadqueue import reload_queue_dependency
 from .dependencies.repolocks import repo_locks_dependency
 from .github.broadcastservices import (
     bootstrap_broadcast_repo,
-    retry_bootstrap_failures,
+    run_reload_worker,
 )
 from .github.sourcepolicy import BroadcastSourcePolicy
 from .handlers.external import external_router
@@ -62,7 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Initialize the broadcast GitHub repository.
     broadcast_repo = await broadcast_repo_dependency()
-    retry_task: asyncio.Task[None] | None = None
+    reload_task: asyncio.Task[None] | None = None
     if config.github_app_disabled_reason:
         logger.warning(
             "GitHub App is disabled", reason=config.github_app_disabled_reason
@@ -70,38 +71,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if config.enable_github_app:
         http_client = await http_client_dependency()
         source_policy = BroadcastSourcePolicy.from_config(config)
-        failures = await bootstrap_broadcast_repo(
+        reload_queue = await reload_queue_dependency()
+        await bootstrap_broadcast_repo(
             http_client=http_client,
             broadcast_repo=broadcast_repo,
             source_policy=source_policy,
+            reload_queue=reload_queue,
             logger=logger,
         )
-        if failures:
-            # Startup does not wait for GitHub to recover. Each process
-            # retries for its own broadcast repository.
-            retry_task = asyncio.create_task(
-                retry_bootstrap_failures(
-                    failures=failures,
-                    http_client=http_client,
-                    broadcast_repo=broadcast_repo,
-                    source_policy=source_policy,
-                    repo_locks=await repo_locks_dependency(),
-                    logger=logger,
-                ),
-                name="github-bootstrap-retry",
-            )
-    # The task retrying the installations and repositories that failed at
-    # startup, if any, is kept on the app's state so that it can be
-    # inspected (as by tests).
-    app.state.github_retry_task = retry_task
+        # Startup does not wait for GitHub to recover. The worker reloads
+        # what failed at startup, and what fails while a push is processed,
+        # for this process's own broadcast repository.
+        reload_task = asyncio.create_task(
+            run_reload_worker(
+                reload_queue=reload_queue,
+                http_client=http_client,
+                broadcast_repo=broadcast_repo,
+                source_policy=source_policy,
+                repo_locks=await repo_locks_dependency(),
+                logger=logger,
+            ),
+            name="github-reload-worker",
+        )
+    # The reload worker's task, if the GitHub App is enabled, is kept on the
+    # app's state so that it can be inspected (as by tests).
+    app.state.github_reload_task = reload_task
 
     yield
 
-    if retry_task is not None:
+    if reload_task is not None:
         # Stopped before the HTTP client it uses is closed.
-        retry_task.cancel()
+        reload_task.cancel()
         with suppress(asyncio.CancelledError):
-            await retry_task
+            await reload_task
     await db_session_dependency.aclose()
     await http_client_dependency.aclose()
 

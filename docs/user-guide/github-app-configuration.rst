@@ -55,14 +55,11 @@ Later changes arrive through push webhooks.
   Git doesn't store empty directories, so a repository whose broadcasts have all been deleted looks like this.
 - If GitHub fails or can't be reached while Semaphore loads a repository, or while it authorizes an installation of the GitHub App or lists the installation's repositories (for example, with a server error, a timeout, an exceeded rate limit, or an authentication error), Semaphore logs a warning and still starts.
   The other installations and repositories are still loaded.
-  Semaphore then retries loading that repository, or that installation's repositories, in the background, waiting longer after each failed attempt (up to five minutes), until it succeeds.
+  Semaphore then loads that repository, or that installation's repositories, in the background (see :ref:`github-app-reloads`).
   The broadcasts are served as soon as they load, without restarting Semaphore.
-  Each Semaphore replica loads and retries on its own, so replicas may briefly serve different broadcasts while GitHub recovers.
 
 After loading, Semaphore logs a ``Loaded broadcasts from GitHub`` summary.
-Its ``failed_installation_count`` and ``failed_repo_count`` fields are the numbers of installations and repositories that are being retried, and ``skipped_file_count`` is the number of skipped files.
-Each retry of a repository logs ``Retrying loading broadcasts from a repository``, and a repository that loads after retrying logs ``Loaded broadcasts from a repository after retrying``.
-Likewise, each retry of an installation logs ``Retrying loading broadcasts from a GitHub App installation``, and an installation that loads after retrying logs ``Loaded broadcasts from a GitHub App installation after retrying``.
+Its ``failed_installation_count`` and ``failed_repo_count`` fields are the numbers of installations and repositories that are queued to be loaded in the background, and ``skipped_file_count`` is the number of skipped files.
 
 .. _github-app-unseen-repos:
 
@@ -78,6 +75,33 @@ For each one, check that:
 - The installation isn't suspended. Semaphore logs a ``Skipping a suspended GitHub App installation`` warning for a suspended installation.
 
 The warning leaves out the repositories of an account whose installation is being retried, because Semaphore doesn't yet know which repositories that installation can see.
+
+.. _github-app-reloads:
+
+Reloading broadcasts after GitHub fails
+=======================================
+
+GitHub doesn't redeliver a webhook on its own, so Semaphore doesn't drop a push that it can't process because of GitHub.
+If GitHub fails or can't be reached while Semaphore processes a push, or while it loads a repository at startup (for example, with a server error, a timeout, an exceeded rate limit, or an authentication error), Semaphore logs a warning and queues the repository to be reloaded in the background.
+It still acknowledges the push to GitHub.
+
+- Until the repository is reloaded, Semaphore keeps serving each broadcast whose file it couldn't read from GitHub as it was before.
+  This includes a broadcast loaded from the repository's former default branch, on the first push after the default branch is changed.
+- Semaphore reloads a queued repository in full from the head of its current default branch.
+  It loads each broadcast file in the ``broadcasts`` directory and stops serving the repository's other broadcasts, including any whose file was deleted and any loaded from a former default branch.
+  So a push's changes are published once GitHub recovers, without another push or a restart.
+- If GitHub fails again, Semaphore retries, waiting longer after each failed attempt (from 10 seconds up to five minutes), until the repository reloads.
+  A repository that fails several times while it's queued is reloaded once per attempt.
+  Once nothing is queued, the next failure starts again with a 10 second wait.
+- If GitHub no longer finds a queued repository, or the repository is no longer accepted (see :ref:`github-app-allowlist`), Semaphore drops it from the queue and logs a ``Dropping a repository that GitHub cannot find from the reload queue`` or ``Dropping a repository that may not publish broadcasts from the reload queue`` warning.
+- An installation of the GitHub App that GitHub failed to authorize, or whose repositories GitHub failed to list, at startup is retried the same way.
+  Once GitHub lists the installation's repositories, Semaphore reloads each accepted repository, and queues any that fails.
+
+Each Semaphore replica keeps its own queue and reloads on its own, so replicas may briefly serve different broadcasts while GitHub recovers.
+A replica's queue is lost when it restarts, which is harmless because the replica loads every repository again at startup.
+
+Each attempt to reload a repository logs ``Retrying loading broadcasts from a repository``, and a repository that reloads logs ``Loaded broadcasts from a repository after retrying``.
+Likewise, each attempt to load an installation's repositories logs ``Retrying loading broadcasts from a GitHub App installation``, and an installation whose repositories GitHub lists logs ``Loaded broadcasts from a GitHub App installation after retrying``.
 
 Create an app with a template URL
 =================================

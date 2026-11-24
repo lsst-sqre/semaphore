@@ -13,10 +13,14 @@ from safir.testing.logging import parse_log_tuples
 
 from semaphore import main
 from semaphore.broadcast.repository import BroadcastMessageRepository
+from semaphore.github import broadcastservices, webhooks
+from semaphore.github.reloadqueue import QueuedRepo, ReloadQueue
+from semaphore.github.repolocks import RepoLocks
 
 from ..support.constants import TEST_BASE_URL
 from ..support.github import (
     DEFAULT_AFTER_SHA,
+    GITHUB_INSTALLATION_ID,
     GITHUB_REPO,
     NULL_SHA,
     GitHubMock,
@@ -24,6 +28,7 @@ from ..support.github import (
     configure_github_app,
     make_message_id,
     make_push_payload,
+    make_repository,
     post_github_webhook,
     post_github_webhook_body,
     sign_webhook_body,
@@ -56,6 +61,13 @@ SECOND_REPO = "lsst-sqre/rsp_broadcast_extra"
 HELLO_PUSH = make_push_payload(added=["broadcasts/hello.md"])
 """Payload of a push that adds a broadcast message file."""
 
+QUEUED_REPO = QueuedRepo(
+    installation_id=str(GITHUB_INSTALLATION_ID), full_name=GITHUB_REPO
+)
+"""The reload queue's entry for `GITHUB_REPO`, as the test pushes' installation
+sees it.
+"""
+
 
 @pytest_asyncio.fixture
 async def client_without_repos(
@@ -73,6 +85,44 @@ async def client_without_repos(
             transport=ASGITransport(main.app), base_url=TEST_BASE_URL
         ) as client:
             yield client
+
+
+@pytest_asyncio.fixture
+async def reloading_client(
+    *,
+    empty_database: None,
+    broadcast_repo: BroadcastMessageRepository,
+    repo_locks: RepoLocks,
+    reload_queue: ReloadQueue,
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncGenerator[AsyncClient]:
+    """Client for the app started with the GitHub App enabled, so that the
+    reload worker runs.
+
+    The allowlist is `GITHUB_REPO` and `SECOND_REPO`. No installation of the
+    app is listed at startup, so no broadcast is loaded then. The worker
+    reloads without waiting between attempts, and webhooks are processed
+    without the delay that lets GitHub reach consistency.
+    """
+    configure_github_app(monkeypatch, repos=f"{GITHUB_REPO},{SECOND_REPO}")
+    monkeypatch.setattr(webhooks, "GITHUB_CONSISTENCY_DELAY", 0)
+    monkeypatch.setattr(broadcastservices, "BOOTSTRAP_RETRY_INITIAL_DELAY", 0)
+    monkeypatch.setattr(broadcastservices, "BOOTSTRAP_RETRY_MAX_DELAY", 0)
+    github_mock.mock_installations([])
+    async with LifespanManager(main.app):
+        async with AsyncClient(
+            transport=ASGITransport(main.app), base_url=TEST_BASE_URL
+        ) as client:
+            yield client
+
+
+async def wait_for_reloads(reload_queue: ReloadQueue) -> None:
+    """Wait, for up to five seconds, until the reload worker has reloaded
+    everything in the reload queue.
+    """
+    async with asyncio.timeout(5):
+        await reload_queue.wait_until_empty()
 
 
 async def get_broadcasts(client: AsyncClient) -> list[dict[str, Any]]:
@@ -348,10 +398,13 @@ async def test_push_removes_broadcast(
 
 @pytest.mark.asyncio
 async def test_push_with_github_error_on_file(
-    github_app_client: AsyncClient, github_mock: GitHubMock
+    github_app_client: AsyncClient,
+    github_mock: GitHubMock,
+    reload_queue: ReloadQueue,
 ) -> None:
     """A GitHub error on one file keeps its stored message, even for a
-    removed file, and the push's other files are still processed.
+    removed file, and the push's other files are still processed. The
+    repository is queued to be reloaded.
     """
     github_mock.mock_installation_token()
     github_mock.mock_branch_head(SHA_A)
@@ -384,6 +437,36 @@ async def test_push_with_github_error_on_file(
         make_message_id("broadcasts/a.md"): "Hello from GitHub.",
         make_message_id("broadcasts/b.md"): "Goodbye from GitHub.",
     }
+    assert reload_queue.pending() == [QUEUED_REPO]
+
+
+@pytest.mark.asyncio
+async def test_push_with_missing_file_does_not_queue_repo(
+    github_app_client: AsyncClient,
+    github_mock: GitHubMock,
+    reload_queue: ReloadQueue,
+) -> None:
+    """A file that does not exist, or whose content is malformed, is not a
+    GitHub failure, so the repository is not queued to be reloaded.
+    """
+    github_mock.mock_installation_token()
+    github_mock.mock_branch_head(SHA_A)
+    github_mock.mock_contents_error(
+        "broadcasts/gone.md", status_code=404, ref=SHA_A
+    )
+    github_mock.mock_file(
+        "broadcasts/bad.md", "---\nsummary: [Bad\n---\n", ref=SHA_A
+    )
+    payload = make_push_payload(
+        after=SHA_A,
+        added=["broadcasts/bad.md"],
+        removed=["broadcasts/gone.md"],
+    )
+
+    response = await post_github_webhook(github_app_client, "push", payload)
+
+    assert response.status_code == 202
+    assert len(reload_queue) == 0
 
 
 @pytest.mark.asyncio
@@ -407,10 +490,11 @@ async def test_push_without_broadcast_changes(
 async def test_push_with_github_error_on_branch_head(
     github_app_client: AsyncClient,
     github_mock: GitHubMock,
+    reload_queue: ReloadQueue,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """If the branch head cannot be looked up, no file is read and the
-    stored messages are kept.
+    """If the branch head cannot be looked up, no file is read, the stored
+    messages are kept and the repository is queued to be reloaded.
     """
     github_mock.mock_installation_token()
     github_mock.mock_branch_head(SHA_A)
@@ -427,11 +511,18 @@ async def test_push_with_github_error_on_branch_head(
     assert response.status_code == 202
     assert len(await get_broadcasts(github_app_client)) == 1
     assert len(get_contents_requests(github_mock)) == 1
-    logs = parse_log_tuples("semaphore", caplog.record_tuples)
-    errors = [log for log in logs if log["severity"] == "error"]
-    assert [e["event"] for e in errors] == [
-        "Could not look up the default branch's head, ignoring the push"
+    assert reload_queue.pending() == [QUEUED_REPO]
+    warnings = get_warnings(caplog)
+    assert [(w["event"], w["github_repo"]) for w in warnings] == [
+        (
+            (
+                "Could not look up the default branch's head, will reload "
+                "the repository"
+            ),
+            GITHUB_REPO,
+        )
     ]
+    assert "gidgethub.GitHubBroken" in warnings[0]["exception"]
 
 
 @pytest.mark.asyncio
@@ -643,10 +734,11 @@ async def test_forced_push_without_broadcasts_dir(
 async def test_forced_push_with_github_error_on_listing(
     github_app_client: AsyncClient,
     github_mock: GitHubMock,
+    reload_queue: ReloadQueue,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """If GitHub fails to list the broadcasts, the force push is ignored with
-    an error log and the stored broadcasts are kept.
+    """If GitHub fails to list the broadcasts, the stored broadcasts are
+    kept and the repository is queued to be reloaded.
     """
     github_mock.mock_installation_token()
     add = mock_main_branch_broadcasts(github_mock)
@@ -659,10 +751,10 @@ async def test_forced_push_with_github_error_on_listing(
 
     assert response.status_code == 202
     assert len(await get_broadcasts(github_app_client)) == 2
-    logs = parse_log_tuples("semaphore", caplog.record_tuples)
-    errors = [log for log in logs if log["severity"] == "error"]
-    assert [e["event"] for e in errors] == [
-        "Could not list the repository's broadcasts, ignoring the push"
+    assert reload_queue.pending() == [QUEUED_REPO]
+    warnings = get_warnings(caplog)
+    assert [(w["event"], w["github_repo"]) for w in warnings] == [
+        ("Could not list the repository's broadcasts, will retry", GITHUB_REPO)
     ]
 
 
@@ -777,11 +869,13 @@ async def test_push_after_default_branch_change(
 
 @pytest.mark.asyncio
 async def test_default_branch_change_with_github_error_on_file(
-    github_app_client: AsyncClient, github_mock: GitHubMock
+    github_app_client: AsyncClient,
+    github_mock: GitHubMock,
+    reload_queue: ReloadQueue,
 ) -> None:
-    """A broadcast from the old default branch is removed even if GitHub
-    fails to return its file from the new one, so that no broadcast is left
-    under the old branch.
+    """A broadcast from the old default branch keeps being served if GitHub
+    fails to return its file from the new one, and the repository is queued
+    to be reloaded. The other broadcasts move to the new branch.
     """
     github_mock.mock_installation_token()
     add = mock_main_branch_broadcasts(github_mock)
@@ -804,9 +898,11 @@ async def test_default_branch_change_with_github_error_on_file(
 
     assert response.status_code == 202
     broadcasts = await get_broadcasts(github_app_client)
-    assert [b["id"] for b in broadcasts] == [
-        make_message_id("broadcasts/b.md", ref="refs/heads/trunk")
+    assert sorted(b["id"] for b in broadcasts) == [
+        make_message_id("broadcasts/a.md"),
+        make_message_id("broadcasts/b.md", ref="refs/heads/trunk"),
     ]
+    assert reload_queue.pending() == [QUEUED_REPO]
 
 
 @pytest.mark.asyncio
@@ -850,6 +946,227 @@ async def test_removal_after_default_branch_change(
     broadcasts = await get_broadcasts(github_app_client)
     assert [b["id"] for b in broadcasts] == [
         make_message_id("broadcasts/a.md", ref="refs/heads/trunk")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reloads_repo_after_github_error_on_branch_head(
+    reloading_client: AsyncClient,
+    github_mock: GitHubMock,
+    reload_queue: ReloadQueue,
+) -> None:
+    """A push that removes a file while GitHub fails to return the branch
+    head is not dropped: the reload worker removes the file's broadcast
+    once GitHub recovers.
+    """
+    github_mock.mock_installation_token()
+    github_mock.mock_branch_head(SHA_A)
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
+    github_mock.mock_branch_head_error(status_code=502)
+    # The reload's first attempt fails as well.
+    github_mock.mock_branch_head_error(status_code=502)
+    github_mock.mock_branch_head(SHA_B)
+    for _ in range(2):
+        github_mock.mock_repository(make_repository())
+    github_mock.mock_contents_error("broadcasts", status_code=404, ref=SHA_B)
+    add = make_push_payload(after=SHA_A, added=["broadcasts/hello.md"])
+    await post_github_webhook(reloading_client, "push", add)
+    remove = make_push_payload(
+        before=SHA_A, after=SHA_B, removed=["broadcasts/hello.md"]
+    )
+
+    response = await post_github_webhook(reloading_client, "push", remove)
+    await wait_for_reloads(reload_queue)
+
+    assert response.status_code == 202
+    assert await get_broadcasts(reloading_client) == []
+    assert len(github_mock.get_repository_requests()) == 2
+
+
+@pytest.mark.asyncio
+async def test_reloads_repo_after_github_error_on_file(
+    reloading_client: AsyncClient,
+    github_mock: GitHubMock,
+    reload_queue: ReloadQueue,
+) -> None:
+    """After a push during which GitHub fails to return a file, the reload
+    worker makes the broadcasts match the branch head.
+    """
+    github_mock.mock_installation_token()
+    add = mock_main_branch_broadcasts(github_mock)
+    github_mock.mock_branch_head(SHA_B)
+    github_mock.mock_contents_error(
+        "broadcasts/a.md", status_code=502, ref=SHA_B
+    )
+    github_mock.mock_file("broadcasts/b.md", GOODBYE_MD, ref=SHA_B)
+    github_mock.mock_repository(make_repository())
+    github_mock.mock_branch_head(SHA_B)
+    github_mock.mock_directory("broadcasts", ["b.md"], ref=SHA_B)
+    github_mock.mock_file("broadcasts/b.md", GOODBYE_MD, ref=SHA_B)
+    await post_github_webhook(reloading_client, "push", add)
+    change = make_push_payload(
+        before=SHA_A,
+        after=SHA_B,
+        removed=["broadcasts/a.md"],
+        modified=["broadcasts/b.md"],
+    )
+
+    response = await post_github_webhook(reloading_client, "push", change)
+    await wait_for_reloads(reload_queue)
+
+    assert response.status_code == 202
+    assert await get_summaries(reloading_client) == {
+        make_message_id("broadcasts/b.md"): "Goodbye from GitHub."
+    }
+
+
+@pytest.mark.asyncio
+async def test_reloads_repo_after_github_error_on_forced_push_listing(
+    reloading_client: AsyncClient,
+    github_mock: GitHubMock,
+    reload_queue: ReloadQueue,
+) -> None:
+    """After a force push for which GitHub fails to list the broadcasts, the
+    reload worker makes the broadcasts match the branch head.
+    """
+    github_mock.mock_installation_token()
+    add = mock_main_branch_broadcasts(github_mock)
+    github_mock.mock_branch_head(SHA_B)
+    github_mock.mock_contents_error("broadcasts", status_code=503, ref=SHA_B)
+    github_mock.mock_repository(make_repository())
+    github_mock.mock_branch_head(SHA_B)
+    github_mock.mock_directory("broadcasts", ["b.md"], ref=SHA_B)
+    github_mock.mock_file("broadcasts/b.md", GOODBYE_MD, ref=SHA_B)
+    await post_github_webhook(reloading_client, "push", add)
+    force = make_push_payload(before=SHA_A, after=SHA_B, forced=True)
+
+    response = await post_github_webhook(reloading_client, "push", force)
+    await wait_for_reloads(reload_queue)
+
+    assert response.status_code == 202
+    assert await get_summaries(reloading_client) == {
+        make_message_id("broadcasts/b.md"): "Goodbye from GitHub."
+    }
+
+
+@pytest.mark.asyncio
+async def test_reloads_repo_after_default_branch_change_with_github_error(
+    reloading_client: AsyncClient,
+    github_mock: GitHubMock,
+    reload_queue: ReloadQueue,
+) -> None:
+    """On the first push to a new default branch, a broadcast whose file
+    GitHub fails to return keeps being served from the old branch until the
+    reload worker stores it once, from the new branch.
+    """
+    github_mock.mock_installation_token()
+    add = mock_main_branch_broadcasts(github_mock)
+    github_mock.mock_branch_head(SHA_B, branch="trunk")
+    github_mock.mock_directory("broadcasts", ["a.md", "b.md"], ref=SHA_B)
+    github_mock.mock_contents_error(
+        "broadcasts/a.md", status_code=502, ref=SHA_B
+    )
+    github_mock.mock_file("broadcasts/b.md", HELLO_MD, ref=SHA_B)
+    repo_response = HeldResponse()
+    github_mock.mock_repository(
+        make_repository(default_branch="trunk"), held=repo_response
+    )
+    github_mock.mock_branch_head(SHA_B, branch="trunk")
+    github_mock.mock_directory("broadcasts", ["a.md", "b.md"], ref=SHA_B)
+    github_mock.mock_file("broadcasts/a.md", GOODBYE_MD, ref=SHA_B)
+    github_mock.mock_file("broadcasts/b.md", HELLO_MD, ref=SHA_B)
+    await post_github_webhook(reloading_client, "push", add)
+    push = make_push_payload(
+        ref="refs/heads/trunk",
+        default_branch="trunk",
+        before=SHA_A,
+        after=SHA_B,
+        modified=["README.md"],
+    )
+
+    response = await post_github_webhook(reloading_client, "push", push)
+    await repo_response.wait_for_request()
+    served_before_reload = await get_summaries(reloading_client)
+    repo_response.release()
+    await wait_for_reloads(reload_queue)
+
+    assert response.status_code == 202
+    assert served_before_reload == {
+        make_message_id("broadcasts/a.md"): "Hello from GitHub.",
+        make_message_id(
+            "broadcasts/b.md", ref="refs/heads/trunk"
+        ): "Hello from GitHub.",
+    }
+    assert await get_summaries(reloading_client) == {
+        make_message_id(
+            "broadcasts/a.md", ref="refs/heads/trunk"
+        ): "Goodbye from GitHub.",
+        make_message_id(
+            "broadcasts/b.md", ref="refs/heads/trunk"
+        ): "Hello from GitHub.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_failures_while_repo_is_queued_reload_it_once(
+    reloading_client: AsyncClient,
+    github_mock: GitHubMock,
+    reload_queue: ReloadQueue,
+) -> None:
+    """Pushes that fail for a repository that is already queued leave one
+    entry for it, which is reloaded once in the worker's next attempt.
+
+    The worker is held reloading `SECOND_REPO` while the pushes fail.
+    """
+    github_mock.mock_installation_token()
+    github_mock.mock_branch_head_error(status_code=502, repo=SECOND_REPO)
+    second_response = HeldResponse()
+    github_mock.mock_repository(
+        make_repository(SECOND_REPO), held=second_response
+    )
+    github_mock.mock_branch_head(SHA_A, repo=SECOND_REPO)
+    github_mock.mock_contents_error(
+        "broadcasts", status_code=404, repo=SECOND_REPO, ref=SHA_A
+    )
+    github_mock.mock_branch_head_error(status_code=502)
+    github_mock.mock_branch_head(SHA_B)
+    github_mock.mock_contents_error(
+        "broadcasts/b.md", status_code=502, ref=SHA_B
+    )
+    github_mock.mock_repository(make_repository())
+    github_mock.mock_branch_head(SHA_B)
+    github_mock.mock_directory("broadcasts", ["a.md", "b.md"], ref=SHA_B)
+    github_mock.mock_file("broadcasts/a.md", HELLO_MD, ref=SHA_B)
+    github_mock.mock_file("broadcasts/b.md", HELLO_MD, ref=SHA_B)
+    second = make_push_payload(
+        repo=SECOND_REPO, after=SHA_A, added=["broadcasts/x.md"]
+    )
+    await post_github_webhook(reloading_client, "push", second)
+    await second_response.wait_for_request()
+    push_a = make_push_payload(after=SHA_A, added=["broadcasts/a.md"])
+    push_b = make_push_payload(
+        before=SHA_A, after=SHA_B, added=["broadcasts/b.md"]
+    )
+
+    responses = [
+        await post_github_webhook(reloading_client, "push", push)
+        for push in (push_a, push_b)
+    ]
+    pending = reload_queue.pending()
+    second_response.release()
+    await wait_for_reloads(reload_queue)
+
+    assert [r.status_code for r in responses] == [202, 202]
+    assert pending == [
+        QueuedRepo(
+            installation_id=str(GITHUB_INSTALLATION_ID), full_name=SECOND_REPO
+        ),
+        QUEUED_REPO,
+    ]
+    assert len(github_mock.get_repository_requests()) == 1
+    assert sorted(b["id"] for b in await get_broadcasts(reloading_client)) == [
+        make_message_id("broadcasts/a.md"),
+        make_message_id("broadcasts/b.md"),
     ]
 
 

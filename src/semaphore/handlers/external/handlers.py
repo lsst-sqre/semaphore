@@ -15,7 +15,9 @@ from structlog.stdlib import BoundLogger
 from ...broadcast.repository import BroadcastMessageRepository
 from ...config import config
 from ...dependencies.broadcastrepo import broadcast_repo_dependency
+from ...dependencies.reloadqueue import reload_queue_dependency
 from ...dependencies.repolocks import repo_locks_dependency
+from ...github.reloadqueue import ReloadQueue
 from ...github.repolocks import RepoLocks
 from ...github.sourcepolicy import BroadcastSourcePolicy
 from ...github.webhooks import router as webhook_router
@@ -72,12 +74,14 @@ async def get_index() -> Index:
 )
 async def post_github_webhook(
     request: Request,
+    *,
     logger: Annotated[BoundLogger, Depends(logger_dependency)],
     http_client: Annotated[httpx.AsyncClient, Depends(http_client_dependency)],
     broadcast_repo: Annotated[
         BroadcastMessageRepository, Depends(broadcast_repo_dependency)
     ],
     repo_locks: Annotated[RepoLocks, Depends(repo_locks_dependency)],
+    reload_queue: Annotated[ReloadQueue, Depends(reload_queue_dependency)],
 ) -> Response:
     """Process GitHub webhook events."""
     if not config.enable_github_app:
@@ -127,7 +131,9 @@ async def post_github_webhook(
 
     logger.debug("Received GitHub webhook", payload=event.data)
     try:
-        installation_id = event.data["installation"]["id"]
+        # GitHub sends the ID as a number. It identifies the installation as
+        # a string elsewhere, as in the reload queue.
+        installation_id = str(event.data["installation"]["id"])
     except KeyError, TypeError:
         # TypeError is raised if installation is null or the body is not a
         # JSON object.
@@ -145,6 +151,7 @@ async def post_github_webhook(
         installation_id=installation_id,
         source_policy=BroadcastSourcePolicy.from_config(config),
         repo_locks=repo_locks,
+        reload_queue=reload_queue,
         logger=logger,
     )
     return Response(status_code=status.HTTP_202_ACCEPTED)

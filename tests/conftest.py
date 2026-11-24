@@ -22,8 +22,10 @@ from semaphore import main
 from semaphore.broadcast.repository import BroadcastMessageRepository
 from semaphore.config import config
 from semaphore.dependencies.broadcastrepo import broadcast_repo_dependency
+from semaphore.dependencies.reloadqueue import reload_queue_dependency
 from semaphore.dependencies.repolocks import repo_locks_dependency
 from semaphore.github import webhooks
+from semaphore.github.reloadqueue import ReloadQueue
 from semaphore.github.repolocks import RepoLocks
 from semaphore.schema import SchemaBase
 
@@ -56,12 +58,14 @@ async def app(
     empty_database: None,
     broadcast_repo: BroadcastMessageRepository,
     repo_locks: RepoLocks,
+    reload_queue: ReloadQueue,
 ) -> AsyncGenerator[FastAPI]:
     """Return a configured test application.
 
     Wraps the application in a lifespan manager so that startup and shutdown
     events are sent during test execution. Each test starts with an empty
-    broadcast repository and its own per-repository locks.
+    broadcast repository, its own per-repository locks and an empty reload
+    queue.
     """
     async with LifespanManager(main.app):
         yield main.app
@@ -139,6 +143,19 @@ def github_mock(httpx_mock: HTTPXMock) -> GitHubMock:
     Any request to GitHub that the test does not mock fails the test.
     """
     return GitHubMock(httpx_mock)
+
+
+@pytest.fixture
+def reload_queue(monkeypatch: pytest.MonkeyPatch) -> ReloadQueue:
+    """Give the app a new, empty reload queue for the test.
+
+    Returns the queue, so a test can inspect what the app queued. As with
+    `repo_locks`, the queue's asyncio events are bound to the event loop
+    that first waits on them, so queues are not shared between tests.
+    """
+    queue = ReloadQueue()
+    monkeypatch.setattr(reload_queue_dependency, "queue", queue)
+    return queue
 
 
 @pytest.fixture

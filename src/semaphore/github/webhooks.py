@@ -11,6 +11,7 @@ from structlog.stdlib import BoundLogger
 from ..broadcast.repository import BroadcastMessageRepository
 from .broadcastservices import update_broadcast_repo_from_push_event
 from .client import create_github_installation_client
+from .reloadqueue import ReloadQueue
 from .repolocks import RepoLocks
 from .sourcepolicy import BroadcastSourcePolicy
 
@@ -35,6 +36,7 @@ async def handle_push_event(
     installation_id: str,
     source_policy: BroadcastSourcePolicy,
     repo_locks: RepoLocks,
+    reload_queue: ReloadQueue,
     logger: BoundLogger,
     **kwargs: Any,
 ) -> None:
@@ -46,7 +48,9 @@ async def handle_push_event(
     ignored. The broadcast files that a push touches are reconciled with the
     default branch's current head, one push per repository at a time. After
     a force push or a change of default branch, all of the repository's
-    broadcasts are reloaded instead (see
+    broadcasts are reloaded instead. If GitHub fails while the push is
+    processed, the repository is added to ``reload_queue``, so that the
+    reload worker reloads it once GitHub recovers (see
     `update_broadcast_repo_from_push_event`).
 
     Parameters
@@ -64,6 +68,8 @@ async def handle_push_event(
         The policy for which repositories may publish broadcast messages.
     repo_locks
         The per-repository locks that serialize pushes for one repository.
+    reload_queue
+        The queue of repositories whose broadcasts must be reloaded.
     logger
         The logger instance
     """
@@ -93,9 +99,11 @@ async def handle_push_event(
     await asyncio.sleep(GITHUB_CONSISTENCY_DELAY)
     await update_broadcast_repo_from_push_event(
         event=event,
+        installation_id=installation_id,
         broadcast_repo=broadcast_repo,
         github_client=github_client,
         repo_locks=repo_locks,
+        reload_queue=reload_queue,
         logger=logger,
     )
 

@@ -3,7 +3,7 @@
 These helpers configure the GitHub App, sign and post webhook events to
 Semaphore, and mock the GitHub REST API with pytest-httpx, including the app
 installations, repositories and contents that Semaphore reads at startup and
-the branch heads that it resolves for pushes.
+the branch heads that it resolves for pushes and reloads.
 """
 
 import asyncio
@@ -582,6 +582,60 @@ class GitHubMock:
                 json={"message": "GitHub error"},
             )
 
+    def mock_repository(
+        self,
+        repository: dict[str, Any],
+        *,
+        held: HeldResponse | None = None,
+    ) -> None:
+        """Mock one request for a repository's resource.
+
+        Mock the repository again to serve it to a later request.
+
+        Parameters
+        ----------
+        repository
+            The repository resource, such as from `make_repository`. It is
+            served at the URL of its ``full_name``.
+        held
+            If set, the response is held until the test releases it, so that
+            the test can act while Semaphore waits for GitHub.
+        """
+        url = f"{GITHUB_API_URL}/repos/{repository['full_name']}"
+        if held is None:
+            self._httpx_mock.add_response(
+                method="GET", url=url, json=repository
+            )
+            return
+
+        async def respond(request: httpx.Request) -> httpx.Response:
+            await held.hold()
+            return httpx.Response(200, json=repository)
+
+        self._httpx_mock.add_callback(respond, method="GET", url=url)
+
+    def mock_repository_error(
+        self, *, status_code: int, repo: str = GITHUB_REPO
+    ) -> None:
+        """Mock one request for a repository's resource that GitHub fails.
+
+        A status code of 404 is how GitHub reports a repository that does not
+        exist or that the installation cannot see.
+
+        Parameters
+        ----------
+        status_code
+            HTTP status code of GitHub's error response.
+        repo
+            Full name (``owner/repo``) of the repository.
+        """
+        self._httpx_mock.add_response(
+            method="GET",
+            url=f"{GITHUB_API_URL}/repos/{repo}",
+            status_code=status_code,
+            json={"message": "GitHub error"},
+        )
+
     def mock_branch_head(
         self,
         sha: str,
@@ -810,6 +864,17 @@ class GitHubMock:
             f"{GITHUB_API_URL}/app/installations/{installation_id}"
             "/access_tokens"
         )
+        return [r for r in self.get_requests() if str(r.url) == url]
+
+    def get_repository_requests(
+        self, repo: str = GITHUB_REPO
+    ) -> list[httpx.Request]:
+        """Return the requests for a repository's resource.
+
+        Each one is made by the reload worker for one reload of the
+        repository.
+        """
+        url = f"{GITHUB_API_URL}/repos/{repo}"
         return [r for r in self.get_requests() if str(r.url) == url]
 
     def get_requests(self) -> list[httpx.Request]:

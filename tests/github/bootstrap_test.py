@@ -1,7 +1,10 @@
-"""Tests for loading broadcast messages from GitHub at startup."""
+"""Tests for loading broadcast messages from GitHub at startup, and for the
+reload worker that reloads what GitHub failed to return.
+"""
 
 import asyncio
 import itertools
+from collections.abc import Iterator
 from typing import Any, Literal
 
 import pytest
@@ -11,14 +14,22 @@ from safir.testing.logging import parse_log_tuples
 
 from semaphore import main
 from semaphore.broadcast.repository import BroadcastMessageRepository
+from semaphore.dependencies.reloadqueue import reload_queue_dependency
 from semaphore.github import broadcastservices
+from semaphore.github.reloadqueue import (
+    QueuedInstallation,
+    QueuedRepo,
+    ReloadQueue,
+)
 from semaphore.github.repolocks import RepoLocks
 
+from ..support.broadcasts import create_active_message
 from ..support.constants import TEST_BASE_URL
 from ..support.github import (
     GITHUB_INSTALLATION_ID,
     GITHUB_REPO,
     GitHubMock,
+    HeldResponse,
     configure_github_app,
     make_installation,
     make_message_id,
@@ -64,8 +75,19 @@ ALLOWLIST = f"{GITHUB_REPO},{FORK_REPO}"
 HELLO_MD = "---\nsummary: Hello from GitHub.\n---\n"
 """A broadcast message file."""
 
+GOODBYE_MD = "---\nsummary: Goodbye from GitHub.\n---\n"
+"""Updated contents of the `HELLO_MD` broadcast message file."""
+
 MALFORMED_MD = "---\nsummary: [Hello from GitHub.\n---\n"
 """A broadcast message file whose front matter is not valid YAML."""
+
+SHA_A = "aaaa" + "0" * 36
+"""Commit SHA that a reloaded repository's default branch points to."""
+
+QUEUED_REPO = QueuedRepo(
+    installation_id=str(GITHUB_INSTALLATION_ID), full_name=GITHUB_REPO
+)
+"""The reload queue's entry for `GITHUB_REPO`."""
 
 type InstallationFailure = Literal["token", "listing"]
 """Which request for an installation GitHub fails: creating its token, or
@@ -76,37 +98,36 @@ INSTALLATION_FAILURES: list[InstallationFailure] = ["token", "listing"]
 """Each `InstallationFailure`, to parametrize tests with."""
 
 pytestmark = pytest.mark.usefixtures(
-    "empty_database", "broadcast_repo", "repo_locks"
+    "empty_database", "broadcast_repo", "repo_locks", "reload_queue"
 )
 """Each test starts the app with an empty database and broadcast
-repository, and its own per-repository locks.
+repository, and its own per-repository locks and reload queue.
 """
 
 
 @pytest.fixture
 def no_retry_delay(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Retry loading the repositories that failed at startup without
-    waiting between attempts.
+    """Make the reload worker reload what is queued without waiting between
+    attempts.
     """
     monkeypatch.setattr(broadcastservices, "BOOTSTRAP_RETRY_INITIAL_DELAY", 0)
     monkeypatch.setattr(broadcastservices, "BOOTSTRAP_RETRY_MAX_DELAY", 0)
 
 
-def get_retry_task() -> asyncio.Task[None] | None:
-    """Return the task that the running app started to retry the
-    repositories that failed at startup, or `None` if it started none.
+def get_reload_task() -> asyncio.Task[None] | None:
+    """Return the reload worker's task that the running app started, or
+    `None` if it started none.
     """
-    return main.app.state.github_retry_task
+    return main.app.state.github_reload_task
 
 
-async def wait_for_retry() -> None:
-    """Wait, for up to five seconds, until the running app's retry task has
-    loaded every repository that failed at startup.
+async def wait_for_reloads() -> None:
+    """Wait, for up to five seconds, until the running app's reload worker
+    has reloaded everything in the reload queue.
     """
-    task = get_retry_task()
-    assert task is not None
+    reload_queue = await reload_queue_dependency()
     async with asyncio.timeout(5):
-        await task
+        await reload_queue.wait_until_empty()
 
 
 async def get_served_ids() -> list[str]:
@@ -282,6 +303,25 @@ def mock_installation_failure(
             [make_repository(repo) for repo in repos],
             installation_id=installation_id,
         )
+
+
+def mock_reload_listing(
+    github_mock: GitHubMock,
+    names: list[str],
+    *,
+    branch: str = "main",
+    sha: str = SHA_A,
+) -> None:
+    """Mock the requests with which the reload worker lists the broadcasts
+    of `GITHUB_REPO` to reload it: the head of the default branch,
+    ``branch``, at ``sha``, and the broadcasts ``names`` at ``sha``.
+
+    The files are left for the test to mock, at ``sha``. So is the
+    repository's resource, which the worker requests for a queued
+    repository but not for a repository of a queued installation.
+    """
+    github_mock.mock_branch_head(sha, branch=branch)
+    github_mock.mock_directory("broadcasts", names, ref=sha)
 
 
 def mock_malformed_file(github_mock: GitHubMock) -> None:
@@ -744,6 +784,29 @@ async def test_summary_counts_failed_installations(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure", INSTALLATION_FAILURES)
+async def test_queues_installation_github_fails(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    reload_queue: ReloadQueue,
+    failure: InstallationFailure,
+) -> None:
+    configure_github_app(monkeypatch)
+    github_mock.mock_installations([make_installation()])
+    mock_installation_failure(github_mock, failure)
+
+    async with LifespanManager(main.app):
+        pending = reload_queue.pending()
+
+    assert pending == [
+        QueuedInstallation(
+            installation_id=str(GITHUB_INSTALLATION_ID),
+            account=GITHUB_REPO.split("/")[0],
+        )
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.usefixtures("no_retry_delay")
 @pytest.mark.parametrize("failure", INSTALLATION_FAILURES)
 async def test_retries_installation_github_fails(
@@ -754,11 +817,11 @@ async def test_retries_installation_github_fails(
     configure_github_app(monkeypatch)
     github_mock.mock_installations([make_installation()])
     mock_installation_failure(github_mock, failure, repos=[GITHUB_REPO])
-    github_mock.mock_directory("broadcasts", ["hello.md"])
-    github_mock.mock_file("broadcasts/hello.md", HELLO_MD)
+    mock_reload_listing(github_mock, ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
 
     async with LifespanManager(main.app):
-        await wait_for_retry()
+        await wait_for_reloads()
         served = await get_served_ids()
 
     assert served == [make_message_id("broadcasts/hello.md")]
@@ -774,11 +837,11 @@ async def test_installation_retry_does_not_read_rejected_repos(
     mock_installation_failure(
         github_mock, "listing", repos=[OTHER_REPO, GITHUB_REPO]
     )
-    github_mock.mock_directory("broadcasts", ["hello.md"])
-    github_mock.mock_file("broadcasts/hello.md", HELLO_MD)
+    mock_reload_listing(github_mock, ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
 
     async with LifespanManager(main.app):
-        await wait_for_retry()
+        await wait_for_reloads()
 
     assert [
         r.url.path
@@ -795,15 +858,20 @@ async def test_installation_retry_does_not_read_rejected_repos(
 async def test_installation_retry_retries_repo_github_fails_to_list(
     github_mock: GitHubMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A repository of a retried installation that GitHub fails to list is
+    queued as a repository, and reloaded in the next attempt.
+    """
     configure_github_app(monkeypatch)
     github_mock.mock_installations([make_installation()])
     mock_installation_failure(github_mock, "listing", repos=[GITHUB_REPO])
-    github_mock.mock_contents_error("broadcasts", status_code=502)
-    github_mock.mock_directory("broadcasts", ["hello.md"])
-    github_mock.mock_file("broadcasts/hello.md", HELLO_MD)
+    github_mock.mock_branch_head(SHA_A)
+    github_mock.mock_contents_error("broadcasts", status_code=502, ref=SHA_A)
+    github_mock.mock_repository(make_repository())
+    mock_reload_listing(github_mock, ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
 
     async with LifespanManager(main.app):
-        await wait_for_retry()
+        await wait_for_reloads()
         served = await get_served_ids()
 
     assert served == [make_message_id("broadcasts/hello.md")]
@@ -820,8 +888,8 @@ async def test_installation_retry_waits_for_repo_lock(
     configure_github_app(monkeypatch)
     github_mock.mock_installations([make_installation()])
     mock_installation_failure(github_mock, "listing", repos=[GITHUB_REPO])
-    github_mock.mock_directory("broadcasts", ["hello.md"])
-    github_mock.mock_file("broadcasts/hello.md", HELLO_MD)
+    mock_reload_listing(github_mock, ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
 
     # Held as a push for the repository would hold it.
     lock = repo_locks.get(GITHUB_REPO)
@@ -832,10 +900,43 @@ async def test_installation_retry_waits_for_repo_lock(
         await asyncio.sleep(0.1)
         locked_requests = get_listing_requests(github_mock)
         lock.release()
-        await wait_for_retry()
+        await wait_for_reloads()
 
     assert locked_requests == []
     assert len(get_listing_requests(github_mock)) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("no_retry_delay")
+async def test_installation_retry_removes_messages_pushed_since_startup(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    broadcast_repo: BroadcastMessageRepository,
+    repo_locks: RepoLocks,
+) -> None:
+    """The repositories of a retried installation are reloaded in full, so
+    a message stored since startup whose file is no longer in the default
+    branch is removed.
+    """
+    configure_github_app(monkeypatch)
+    github_mock.mock_installations([make_installation()])
+    mock_installation_failure(github_mock, "listing", repos=[GITHUB_REPO])
+    mock_reload_listing(github_mock, ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
+
+    # Held until a push for the repository, since startup, has stored a
+    # message whose file was removed before the retry.
+    lock = repo_locks.get(GITHUB_REPO)
+    await lock.acquire()
+    async with LifespanManager(main.app):
+        broadcast_repo.add(
+            create_active_message(make_message_id("broadcasts/gone.md"))
+        )
+        lock.release()
+        await wait_for_reloads()
+        served = await get_served_ids()
+
+    assert served == [make_message_id("broadcasts/hello.md")]
 
 
 @pytest.mark.asyncio
@@ -850,12 +951,12 @@ async def test_logs_installation_retries(
     github_mock.mock_installation_token_error(status_code=502, times=2)
     github_mock.mock_installation_token()
     github_mock.mock_installation_repositories([make_repository(GITHUB_REPO)])
-    github_mock.mock_directory("broadcasts", ["bad.md", "hello.md"])
-    github_mock.mock_file("broadcasts/bad.md", MALFORMED_MD)
-    github_mock.mock_file("broadcasts/hello.md", HELLO_MD)
+    mock_reload_listing(github_mock, ["bad.md", "hello.md"])
+    github_mock.mock_file("broadcasts/bad.md", MALFORMED_MD, ref=SHA_A)
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
 
     async with LifespanManager(main.app):
-        await wait_for_retry()
+        await wait_for_reloads()
 
     account = GITHUB_REPO.split("/")[0]
     retry_logs = [
@@ -994,6 +1095,22 @@ async def test_does_not_warn_about_repos_of_failed_installation(
 
 
 @pytest.mark.asyncio
+async def test_queues_repo_github_fails_to_list(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    reload_queue: ReloadQueue,
+) -> None:
+    configure_github_app(monkeypatch)
+    mock_installation(github_mock, [GITHUB_REPO])
+    github_mock.mock_contents_error("broadcasts", status_code=502)
+
+    async with LifespanManager(main.app):
+        pending = reload_queue.pending()
+
+    assert pending == [QUEUED_REPO]
+
+
+@pytest.mark.asyncio
 @pytest.mark.usefixtures("no_retry_delay")
 async def test_retries_repo_github_fails_to_list(
     github_mock: GitHubMock, monkeypatch: pytest.MonkeyPatch
@@ -1001,11 +1118,12 @@ async def test_retries_repo_github_fails_to_list(
     configure_github_app(monkeypatch)
     mock_installation(github_mock, [GITHUB_REPO])
     github_mock.mock_contents_error("broadcasts", status_code=502)
-    github_mock.mock_directory("broadcasts", ["hello.md"])
-    github_mock.mock_file("broadcasts/hello.md", HELLO_MD)
+    github_mock.mock_repository(make_repository())
+    mock_reload_listing(github_mock, ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
 
     async with LifespanManager(main.app):
-        await wait_for_retry()
+        await wait_for_reloads()
         served = await get_served_ids()
 
     assert served == [make_message_id("broadcasts/hello.md")]
@@ -1018,14 +1136,16 @@ async def test_retries_repo_github_fails_to_return_file(
 ) -> None:
     configure_github_app(monkeypatch)
     mock_installation(github_mock, [GITHUB_REPO])
-    for _ in range(2):
-        github_mock.mock_directory("broadcasts", ["broken.md", "hello.md"])
-        github_mock.mock_file("broadcasts/hello.md", HELLO_MD)
+    github_mock.mock_directory("broadcasts", ["broken.md", "hello.md"])
     github_mock.mock_contents_error("broadcasts/broken.md", status_code=500)
-    github_mock.mock_file("broadcasts/broken.md", HELLO_MD)
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD)
+    github_mock.mock_repository(make_repository())
+    mock_reload_listing(github_mock, ["broken.md", "hello.md"])
+    github_mock.mock_file("broadcasts/broken.md", HELLO_MD, ref=SHA_A)
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
 
     async with LifespanManager(main.app):
-        await wait_for_retry()
+        await wait_for_reloads()
         served = await get_served_ids()
 
     assert sorted(served) == [
@@ -1041,34 +1161,196 @@ async def test_retries_repo_whose_file_times_out(
 ) -> None:
     configure_github_app(monkeypatch)
     mock_installation(github_mock, [GITHUB_REPO])
-    for _ in range(2):
-        github_mock.mock_directory("broadcasts", ["hello.md"])
+    github_mock.mock_directory("broadcasts", ["hello.md"])
     github_mock.mock_contents_timeout("broadcasts/hello.md")
-    github_mock.mock_file("broadcasts/hello.md", HELLO_MD)
+    github_mock.mock_repository(make_repository())
+    mock_reload_listing(github_mock, ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
 
     async with LifespanManager(main.app):
-        await wait_for_retry()
+        await wait_for_reloads()
         served = await get_served_ids()
 
     assert served == [make_message_id("broadcasts/hello.md")]
 
 
 @pytest.mark.asyncio
-async def test_does_not_retry_malformed_file(
+@pytest.mark.usefixtures("no_retry_delay")
+async def test_retry_removes_file_deleted_before_retry(
     github_mock: GitHubMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A repository that failed at startup is reloaded in full, so a file
+    that was deleted before the retry stops being served.
+    """
+    configure_github_app(monkeypatch)
+    mock_installation(github_mock, [GITHUB_REPO])
+    github_mock.mock_directory("broadcasts", ["broken.md", "gone.md"])
+    github_mock.mock_contents_error("broadcasts/broken.md", status_code=502)
+    github_mock.mock_file("broadcasts/gone.md", HELLO_MD)
+    repo_response = HeldResponse()
+    github_mock.mock_repository(make_repository(), held=repo_response)
+    mock_reload_listing(github_mock, ["broken.md"])
+    github_mock.mock_file("broadcasts/broken.md", HELLO_MD, ref=SHA_A)
+
+    async with LifespanManager(main.app):
+        await repo_response.wait_for_request()
+        served_at_startup = await get_served_ids()
+        repo_response.release()
+        await wait_for_reloads()
+        served = await get_served_ids()
+
+    assert make_message_id("broadcasts/gone.md") in served_at_startup
+    assert served == [make_message_id("broadcasts/broken.md")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("no_retry_delay")
+async def test_retry_follows_default_branch_change(
+    github_mock: GitHubMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A repository whose default branch changed before the retry serves one
+    copy of each broadcast, from the new default branch.
+    """
+    configure_github_app(monkeypatch)
+    mock_installation(github_mock, [GITHUB_REPO])
+    github_mock.mock_directory("broadcasts", ["a.md", "b.md"])
+    github_mock.mock_contents_error("broadcasts/a.md", status_code=502)
+    github_mock.mock_file("broadcasts/b.md", HELLO_MD)
+    github_mock.mock_repository(make_repository(default_branch="trunk"))
+    mock_reload_listing(github_mock, ["a.md", "b.md"], branch="trunk")
+    github_mock.mock_file("broadcasts/a.md", HELLO_MD, ref=SHA_A)
+    github_mock.mock_file("broadcasts/b.md", HELLO_MD, ref=SHA_A)
+
+    async with LifespanManager(main.app):
+        await wait_for_reloads()
+        served = await get_served_ids()
+
+    assert sorted(served) == [
+        make_message_id("broadcasts/a.md", ref="refs/heads/trunk"),
+        make_message_id("broadcasts/b.md", ref="refs/heads/trunk"),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("no_retry_delay")
+async def test_retries_repo_github_fails_again(
+    github_mock: GitHubMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A repository that GitHub fails again while it is reloaded stays
+    queued and is reloaded in the next attempt. The file that failed keeps
+    being served meanwhile.
+    """
+    configure_github_app(monkeypatch)
+    mock_installation(github_mock, [GITHUB_REPO])
+    github_mock.mock_directory("broadcasts", ["a.md", "b.md"])
+    github_mock.mock_file("broadcasts/a.md", HELLO_MD)
+    github_mock.mock_contents_error("broadcasts/b.md", status_code=502)
+    for _ in range(2):
+        github_mock.mock_repository(make_repository())
+        mock_reload_listing(github_mock, ["a.md", "b.md"])
+    github_mock.mock_contents_error(
+        "broadcasts/a.md", status_code=502, ref=SHA_A
+    )
+    github_mock.mock_file("broadcasts/b.md", HELLO_MD, ref=SHA_A)
+    github_mock.mock_file("broadcasts/a.md", GOODBYE_MD, ref=SHA_A)
+    github_mock.mock_file("broadcasts/b.md", HELLO_MD, ref=SHA_A)
+
+    async with LifespanManager(main.app):
+        await wait_for_reloads()
+        served = await get_served_ids()
+
+    assert sorted(served) == [
+        make_message_id("broadcasts/a.md"),
+        make_message_id("broadcasts/b.md"),
+    ]
+    assert len(github_mock.get_repository_requests()) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("no_retry_delay")
+async def test_retry_drops_repo_github_cannot_find(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    configure_github_app(monkeypatch)
+    mock_installation(github_mock, [GITHUB_REPO])
+    github_mock.mock_contents_error("broadcasts", status_code=502)
+    github_mock.mock_repository_error(status_code=404)
+
+    async with LifespanManager(main.app):
+        await wait_for_reloads()
+
+    assert [
+        (log["event"], log["github_repo"])
+        for log in get_logs(caplog)
+        if log["event"].startswith("Dropping")
+    ] == [
+        (
+            (
+                "Dropping a repository that GitHub cannot find from the "
+                "reload queue"
+            ),
+            GITHUB_REPO,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("no_retry_delay")
+async def test_retry_drops_repo_source_policy_rejects(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A queued repository that is now a fork is dropped from the queue
+    without reading its broadcasts.
+    """
+    configure_github_app(monkeypatch)
+    mock_installation(github_mock, [GITHUB_REPO])
+    github_mock.mock_contents_error("broadcasts", status_code=502)
+    github_mock.mock_repository(make_repository(fork=True))
+
+    async with LifespanManager(main.app):
+        await wait_for_reloads()
+
+    assert len(get_listing_requests(github_mock)) == 1
+    assert [
+        (log["event"], log["github_repo"], log["reason"])
+        for log in get_logs(caplog)
+        if log["event"].startswith("Dropping")
+    ] == [
+        (
+            (
+                "Dropping a repository that may not publish broadcasts from "
+                "the reload queue"
+            ),
+            GITHUB_REPO,
+            "fork",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_does_not_queue_malformed_file(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    reload_queue: ReloadQueue,
 ) -> None:
     configure_github_app(monkeypatch)
     mock_malformed_file(github_mock)
 
     async with LifespanManager(main.app):
-        retry_task = get_retry_task()
+        pending = reload_queue.pending()
 
-    assert retry_task is None
+    assert pending == []
 
 
 @pytest.mark.asyncio
-async def test_does_not_retry_file_that_does_not_exist(
-    github_mock: GitHubMock, monkeypatch: pytest.MonkeyPatch
+async def test_does_not_queue_file_that_does_not_exist(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    reload_queue: ReloadQueue,
 ) -> None:
     configure_github_app(monkeypatch)
     mock_installation(github_mock, [GITHUB_REPO])
@@ -1077,22 +1359,41 @@ async def test_does_not_retry_file_that_does_not_exist(
     github_mock.mock_file("broadcasts/hello.md", HELLO_MD)
 
     async with LifespanManager(main.app):
-        retry_task = get_retry_task()
+        pending = reload_queue.pending()
 
-    assert retry_task is None
+    assert pending == []
 
 
 @pytest.mark.asyncio
-async def test_does_not_retry_when_every_repo_loads(
-    github_mock: GitHubMock, monkeypatch: pytest.MonkeyPatch
+async def test_reload_worker_runs_when_every_repo_loads(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    reload_queue: ReloadQueue,
 ) -> None:
     configure_github_app(monkeypatch, repos=ALLOWLIST)
     mock_github(github_mock)
 
     async with LifespanManager(main.app):
-        retry_task = get_retry_task()
+        reload_task = get_reload_task()
+        assert reload_task is not None
+        await asyncio.sleep(0)
+        running = not reload_task.done()
+        pending = reload_queue.pending()
 
-    assert retry_task is None
+    assert running
+    assert pending == []
+
+
+@pytest.mark.asyncio
+async def test_no_reload_worker_when_github_app_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_github_app(monkeypatch, repos=None)
+
+    async with LifespanManager(main.app):
+        reload_task = get_reload_task()
+
+    assert reload_task is None
 
 
 @pytest.mark.asyncio
@@ -1101,16 +1402,49 @@ async def test_shutdown_cancels_pending_retry(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """The worker is cancelled while it waits for its first attempt."""
     configure_github_app(monkeypatch)
     mock_installation(github_mock, [GITHUB_REPO])
     github_mock.mock_contents_error("broadcasts", status_code=502)
 
     async with LifespanManager(main.app):
-        retry_task = get_retry_task()
-        assert retry_task is not None
-        assert not retry_task.done()
+        reload_task = get_reload_task()
+        assert reload_task is not None
+        await asyncio.sleep(0)
+        assert not reload_task.done()
 
-    assert retry_task.cancelled()
+    assert reload_task.cancelled()
+    assert [
+        log
+        for log in get_logs(caplog)
+        if log["severity"] in ("error", "critical")
+    ] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("no_retry_delay")
+async def test_shutdown_cancels_retry_in_progress(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    repo_locks: RepoLocks,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The worker is cancelled while it waits for GitHub during a reload,
+    and the repository's lock is released.
+    """
+    configure_github_app(monkeypatch)
+    mock_installation(github_mock, [GITHUB_REPO])
+    github_mock.mock_contents_error("broadcasts", status_code=502)
+    repo_response = HeldResponse()
+    github_mock.mock_repository(make_repository(), held=repo_response)
+
+    async with LifespanManager(main.app):
+        reload_task = get_reload_task()
+        assert reload_task is not None
+        await repo_response.wait_for_request()
+
+    assert reload_task.cancelled()
+    assert not repo_locks.get(GITHUB_REPO).locked()
     assert [
         log
         for log in get_logs(caplog)
@@ -1127,13 +1461,17 @@ async def test_logs_retries(
 ) -> None:
     configure_github_app(monkeypatch)
     mock_installation(github_mock, [GITHUB_REPO])
-    github_mock.mock_contents_error("broadcasts", status_code=502, times=2)
-    github_mock.mock_directory("broadcasts", ["bad.md", "hello.md"])
-    github_mock.mock_file("broadcasts/bad.md", MALFORMED_MD)
-    github_mock.mock_file("broadcasts/hello.md", HELLO_MD)
+    github_mock.mock_contents_error("broadcasts", status_code=502)
+    for _ in range(2):
+        github_mock.mock_repository(make_repository())
+        github_mock.mock_branch_head(SHA_A)
+    github_mock.mock_contents_error("broadcasts", status_code=502, ref=SHA_A)
+    github_mock.mock_directory("broadcasts", ["bad.md", "hello.md"], ref=SHA_A)
+    github_mock.mock_file("broadcasts/bad.md", MALFORMED_MD, ref=SHA_A)
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
 
     async with LifespanManager(main.app):
-        await wait_for_retry()
+        await wait_for_reloads()
 
     retry_logs = [
         log
@@ -1176,8 +1514,9 @@ async def test_retry_waits_for_repo_lock(
     configure_github_app(monkeypatch)
     mock_installation(github_mock, [GITHUB_REPO])
     github_mock.mock_contents_error("broadcasts", status_code=502)
-    github_mock.mock_directory("broadcasts", ["hello.md"])
-    github_mock.mock_file("broadcasts/hello.md", HELLO_MD)
+    github_mock.mock_repository(make_repository())
+    mock_reload_listing(github_mock, ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
 
     # Held as a push for the repository would hold it.
     lock = repo_locks.get(GITHUB_REPO)
@@ -1186,12 +1525,12 @@ async def test_retry_waits_for_repo_lock(
         # Long enough for the retry to finish if it did not wait for the
         # lock.
         await asyncio.sleep(0.1)
-        locked_requests = get_listing_requests(github_mock)
+        locked_requests = github_mock.get_repository_requests()
         lock.release()
-        await wait_for_retry()
+        await wait_for_reloads()
 
-    assert len(locked_requests) == 1
-    assert len(get_listing_requests(github_mock)) == 2
+    assert locked_requests == []
+    assert len(github_mock.get_repository_requests()) == 1
 
 
 @pytest.mark.asyncio
@@ -1201,15 +1540,67 @@ async def test_retry_authorizes_each_attempt(
 ) -> None:
     configure_github_app(monkeypatch)
     mock_installation(github_mock, [GITHUB_REPO])
-    github_mock.mock_contents_error("broadcasts", status_code=502, times=2)
-    github_mock.mock_directory("broadcasts", ["hello.md"])
-    github_mock.mock_file("broadcasts/hello.md", HELLO_MD)
+    github_mock.mock_contents_error("broadcasts", status_code=502)
+    for _ in range(2):
+        github_mock.mock_repository(make_repository())
+        github_mock.mock_branch_head(SHA_A)
+    github_mock.mock_contents_error("broadcasts", status_code=502, ref=SHA_A)
+    github_mock.mock_directory("broadcasts", ["hello.md"], ref=SHA_A)
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
 
     async with LifespanManager(main.app):
-        await wait_for_retry()
+        await wait_for_reloads()
 
     # One token at startup, then one for each of the two attempts.
     assert len(github_mock.get_token_requests()) == 3
+
+
+@pytest.mark.asyncio
+async def test_retry_backoff_restarts_once_queue_empties(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    reload_queue: ReloadQueue,
+) -> None:
+    """The waits between attempts grow while something stays queued, and
+    start again from the initial delay for what is queued after the queue
+    has emptied.
+    """
+    monkeypatch.setattr(broadcastservices, "BOOTSTRAP_RETRY_INITIAL_DELAY", 10)
+    monkeypatch.setattr(broadcastservices, "BOOTSTRAP_RETRY_MAX_DELAY", 300)
+    iter_delays = broadcastservices._iter_retry_delays
+    rounds: list[list[float]] = []
+
+    def iter_recorded_delays() -> Iterator[float]:
+        """Record the delays of each round of attempts, without waiting."""
+        delays: list[float] = []
+        rounds.append(delays)
+        for delay in iter_delays():
+            delays.append(delay)
+            yield 0
+
+    monkeypatch.setattr(
+        broadcastservices, "_iter_retry_delays", iter_recorded_delays
+    )
+    configure_github_app(monkeypatch)
+    mock_installation(github_mock, [GITHUB_REPO])
+    github_mock.mock_contents_error("broadcasts", status_code=502)
+    # The first round's two attempts, then the second round's one.
+    github_mock.mock_contents_error("broadcasts", status_code=502, ref=SHA_A)
+    for _ in range(2):
+        mock_reload_listing(github_mock, [])
+    for _ in range(3):
+        github_mock.mock_repository(make_repository())
+    github_mock.mock_branch_head(SHA_A)
+
+    async with LifespanManager(main.app):
+        await wait_for_reloads()
+        reload_queue.add_repo(
+            installation_id=str(GITHUB_INSTALLATION_ID),
+            repo_full_name=GITHUB_REPO,
+        )
+        await wait_for_reloads()
+
+    assert rounds == [[10, 20], [10]]
 
 
 def test_retry_delays_back_off_exponentially_to_cap(

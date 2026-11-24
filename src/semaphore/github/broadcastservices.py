@@ -2,14 +2,14 @@
 
 import asyncio
 import dataclasses
-from collections.abc import AsyncGenerator, Iterable, Iterator, Sequence
-from contextlib import AbstractAsyncContextManager, nullcontext
+from collections.abc import AsyncGenerator, Iterable, Iterator, Mapping
+from enum import Enum, auto
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Literal, Self
 
 import httpx
-from gidgethub import BadRequest, GitHubException, RateLimitExceeded
+from gidgethub import BadRequest, GitHubException
 from gidgethub.httpx import GitHubAPI
 from gidgethub.sansio import Event, accept_format
 from structlog.stdlib import BoundLogger
@@ -23,6 +23,7 @@ from .client import (
     create_github_installation_client,
     get_app_jwt,
 )
+from .reloadqueue import QueuedInstallation, QueuedRepo, ReloadQueue
 from .repolocks import RepoLocks
 from .sourcepolicy import BroadcastSourcePolicy
 
@@ -32,15 +33,15 @@ message files.
 """
 
 BOOTSTRAP_RETRY_INITIAL_DELAY = 10.0
-"""Seconds to wait before the first attempt to load again the installations
-and repositories that failed at startup (see `retry_bootstrap_failures`).
-The wait doubles after each attempt in which something fails, up to
-`BOOTSTRAP_RETRY_MAX_DELAY`.
+"""Seconds that the reload worker waits before its first attempt to reload
+the repositories and installations in the reload queue (see
+`run_reload_worker`). The wait doubles after each attempt that leaves
+something in the queue, up to `BOOTSTRAP_RETRY_MAX_DELAY`.
 """
 
 BOOTSTRAP_RETRY_MAX_DELAY = 300.0
-"""Most seconds to wait between attempts to load again the installations and
-repositories that failed at startup.
+"""Most seconds that the reload worker waits between attempts to reload the
+repositories and installations in the reload queue.
 """
 
 _ID_PREFIX = "github.com/"
@@ -73,13 +74,25 @@ class GitHubMessageRef:
     """Git ref (e.g. ``refs/heads/main``)"""
 
     @classmethod
-    def from_push_event(cls, *, path: str, event: Event) -> Self:
-        return cls(
-            path=path,
-            repo_name=event.data["repository"]["name"],
-            repo_owner=event.data["repository"]["owner"]["name"],
-            ref=event.data["ref"],
-        )
+    def from_repository(
+        cls, *, path: str, repository: Mapping[str, Any], ref: str
+    ) -> Self:
+        """Make the reference of a message in a GitHub repository.
+
+        Parameters
+        ----------
+        path
+            Posix file path of the message in the repository.
+        repository
+            The repository resource, such as the ``repository`` object of a
+            push webhook payload or a repository from the GitHub v3 API. Its
+            ``full_name`` (``owner/repo``) is used.
+        ref
+            Git ref that the message is loaded from (e.g.
+            ``refs/heads/main``).
+        """
+        owner, name = repository["full_name"].split("/", maxsplit=1)
+        return cls(path=path, repo_name=name, repo_owner=owner, ref=ref)
 
     @classmethod
     def from_id(cls, identifier: str) -> Self | None:
@@ -167,12 +180,39 @@ def get_repo_message_refs(
     return message_refs
 
 
+class _FileOutcome(Enum):
+    """The outcome of reconciling a broadcast message with its file (see
+    `_reconcile_file_at_commit`).
+    """
+
+    loaded = auto()
+    """The file's message was added or updated."""
+
+    absent = auto()
+    """The file does not exist, or is not relevant to this Phalanx
+    environment, so it has no message.
+    """
+
+    skipped = auto()
+    """The file's content could not be loaded, as when it is malformed. Its
+    stored message, if any, was left unchanged.
+    """
+
+    failed = auto()
+    """GitHub failed to return the file (see `_is_github_failure`), so its
+    repository must be reloaded. Its stored message, if any, was left
+    unchanged.
+    """
+
+
 async def update_broadcast_repo_from_push_event(
     *,
     event: Event,
+    installation_id: str,
     broadcast_repo: BroadcastMessageRepository,
     github_client: GitHubAPI,
     repo_locks: RepoLocks,
+    reload_queue: ReloadQueue,
     logger: BoundLogger,
 ) -> None:
     """Update messages in the repository based on a GitHub webhook for the
@@ -202,20 +242,31 @@ async def update_broadcast_repo_from_push_event(
       old ref would otherwise never be updated or removed.
 
     The repository's lock is held throughout, so pushes for one repository
-    are processed one at a time. If the head cannot be looked up, the push
-    is ignored with an error log. Other GitHub errors on a file, unlike the
-    404 of a missing file, are logged and leave the file's message as it is.
+    are processed one at a time.
+
+    GitHub does not redeliver a webhook on its own, so a push that GitHub
+    fails is not dropped. If GitHub fails to return the head, to list the
+    broadcasts or to return a file (other than with the 404 of a missing
+    file), the failure is logged with a warning, the messages that could not
+    be read are left as they are, and the repository is added to
+    ``reload_queue``. The reload worker then reloads the repository in full
+    once GitHub recovers (see `run_reload_worker`).
 
     Parameters
     ----------
     event
         The parsed event payload.
+    installation_id
+        ID of the GitHub App installation that sent the event, which can see
+        the repository.
     broadcast_repo
         The broadcast message repository.
     github_client
         The GitHub API client, pre-authorized as an app installation.
     repo_locks
         The per-repository locks of broadcast sources.
+    reload_queue
+        The queue of repositories whose broadcasts must be reloaded.
     logger
         The logger instance
     """
@@ -232,6 +283,7 @@ async def update_broadcast_repo_from_push_event(
 
     paths = sorted(filter(is_broadcast_message, files_written | files_removed))
     repository = event.data["repository"]
+    ref = event.data["ref"]
     async with repo_locks.get(repository["full_name"]):
         # Decided under the lock, since another push for the repository may
         # change its stored messages.
@@ -247,49 +299,112 @@ async def update_broadcast_repo_from_push_event(
                 repo_full_name=repository["full_name"],
                 branch=repository["default_branch"],
             )
-        except Exception as e:
-            logger.exception(
-                "Could not look up the default branch's head, ignoring the "
-                "push",
+        except Exception:
+            logger.warning(
+                "Could not look up the default branch's head, will reload the "
+                "repository",
                 github_repo=repository["full_name"],
                 branch=repository["default_branch"],
-                error=str(e),
+                exc_info=True,
             )
-            return
-        logger.debug(
-            "Reading broadcast files at the default branch's head",
+            failed = True
+        else:
+            logger.debug(
+                "Reading broadcast files at the default branch's head",
+                head_sha=head_sha,
+                after_sha=event.data["after"],
+            )
+            failed = await _reconcile_push_at_commit(
+                repository=repository,
+                ref=ref,
+                head_sha=head_sha,
+                paths=paths,
+                reload_reason=reload_reason,
+                broadcast_repo=broadcast_repo,
+                github_client=github_client,
+                logger=logger,
+            )
+
+        if failed:
+            # Queued under the lock, as the reload worker removes the
+            # repository from the queue under the lock once it reloads it.
+            reload_queue.add_repo(
+                installation_id=installation_id,
+                repo_full_name=repository["full_name"],
+            )
+
+
+async def _reconcile_push_at_commit(
+    *,
+    repository: Mapping[str, Any],
+    ref: str,
+    head_sha: str,
+    paths: Iterable[str],
+    reload_reason: str | None,
+    broadcast_repo: BroadcastMessageRepository,
+    github_client: GitHubAPI,
+    logger: BoundLogger,
+) -> bool:
+    """Reconcile the messages of a pushed repository with its default
+    branch's head, as `update_broadcast_repo_from_push_event` describes.
+
+    Parameters
+    ----------
+    repository
+        The ``repository`` object of the push webhook payload.
+    ref
+        The pushed ref, which is the default branch's.
+    head_sha
+        Commit SHA of the default branch's head, to read the files at.
+    paths
+        Paths of the broadcast files that the push's commits touched.
+    reload_reason
+        Why the repository is reloaded in full, or `None` to reconcile only
+        ``paths``.
+    broadcast_repo
+        The broadcast message repository.
+    github_client
+        The GitHub API client, pre-authorized as an app installation.
+    logger
+        The logger instance
+
+    Returns
+    -------
+    bool
+        Whether GitHub failed, so that the repository must be reloaded.
+    """
+    if reload_reason is not None:
+        logger.info(
+            "Reloading all broadcasts of the repository",
+            github_repo=repository["full_name"],
+            reason=reload_reason,
             head_sha=head_sha,
-            after_sha=event.data["after"],
         )
+        result = await _reload_repo_broadcasts(
+            repository=repository,
+            ref=ref,
+            head_sha=head_sha,
+            broadcast_repo=broadcast_repo,
+            github_client=github_client,
+            logger=logger,
+        )
+        return result.failed
 
-        if reload_reason is not None:
-            logger.info(
-                "Reloading all broadcasts of the repository",
-                github_repo=repository["full_name"],
-                reason=reload_reason,
-                head_sha=head_sha,
-            )
-            await _reload_repo_broadcasts(
-                event=event,
-                head_sha=head_sha,
-                broadcast_repo=broadcast_repo,
-                github_client=github_client,
-                logger=logger,
-            )
-            return
-
-        for path in paths:
-            await _reconcile_file_at_commit(
-                file_path=path,
-                message_ref=GitHubMessageRef.from_push_event(
-                    path=path, event=event
-                ),
-                contents_url=repository["contents_url"],
-                git_ref=head_sha,
-                broadcast_repo=broadcast_repo,
-                github_client=github_client,
-                logger=logger,
-            )
+    failed = False
+    for path in paths:
+        outcome = await _reconcile_file_at_commit(
+            file_path=path,
+            message_ref=GitHubMessageRef.from_repository(
+                path=path, repository=repository, ref=ref
+            ),
+            contents_url=repository["contents_url"],
+            git_ref=head_sha,
+            broadcast_repo=broadcast_repo,
+            github_client=github_client,
+            logger=logger,
+        )
+        failed = failed or outcome is _FileOutcome.failed
+    return failed
 
 
 def _get_reload_reason(
@@ -325,31 +440,42 @@ def _get_reload_reason(
 
 async def _reload_repo_broadcasts(
     *,
-    event: Event,
+    repository: Mapping[str, Any],
+    ref: str,
     head_sha: str,
     broadcast_repo: BroadcastMessageRepository,
     github_client: GitHubAPI,
     logger: BoundLogger,
-) -> None:
-    """Make the stored messages of a pushed repository match the broadcast
-    files of its default branch at a commit.
+) -> _RepoLoadResult:
+    """Make the stored messages of a repository match the broadcast files of
+    its default branch at a commit.
+
+    This is shared by a push that needs a full reload and by the reload
+    worker. The caller holds the repository's lock.
 
     The repository's broadcasts directory is listed at the commit, and each
-    broadcast file in it is reconciled with the commit (see
-    `_reconcile_file_at_commit`). Then every other stored message of the
-    repository is removed, which includes every message stored under a ref
-    other than the pushed one. A file that GitHub fails to return (other
-    than with a 404) keeps its message under the pushed ref, if it has one.
+    broadcast file in it is reconciled with the commit, as a message under
+    ``ref`` (see `_reconcile_file_at_commit`). Then every other stored
+    message of the repository is removed, which includes every message
+    stored under a ref other than ``ref``, except one whose file is listed
+    but GitHub fails to return (other than with a 404). Such a file keeps
+    whatever is served for it, under any ref, until the repository is
+    reloaded, and the reload is marked as failed.
 
     If the directory does not exist at the commit, the repository has no
     broadcasts and all of its messages are removed. If GitHub fails to list
-    the directory for another reason, the push is ignored with an error log
-    and the stored messages are kept.
+    the directory for another reason, the failure is logged with a warning,
+    the stored messages are kept and the reload is marked as failed.
 
     Parameters
     ----------
-    event
-        The parsed event payload.
+    repository
+        The repository resource, such as the ``repository`` object of a push
+        webhook payload or a repository from the GitHub v3 API. Its
+        ``full_name`` and ``contents_url`` are used.
+    ref
+        Git ref of the default branch (``refs/heads/<branch>``), which
+        identifies the messages.
     head_sha
         Commit SHA of the default branch's head, to read the files at.
     broadcast_repo
@@ -358,8 +484,15 @@ async def _reload_repo_broadcasts(
         The GitHub API client, pre-authorized as an app installation.
     logger
         The logger instance
+
+    Returns
+    -------
+    _RepoLoadResult
+        What was loaded from the repository, and whether GitHub failed, so
+        that the repository must be reloaded again.
     """
-    repository = event.data["repository"]
+    full_name = repository["full_name"]
+    logger = logger.bind(github_repo=full_name)
     try:
         paths = await _list_broadcast_paths(
             github_client=github_client,
@@ -367,23 +500,24 @@ async def _reload_repo_broadcasts(
             git_ref=head_sha,
         )
     except Exception as e:
-        if _is_not_found(e):
-            # The broadcasts directory does not exist at the commit.
-            paths = []
-        else:
-            logger.exception(
-                "Could not list the repository's broadcasts, ignoring the "
-                "push",
-                github_repo=repository["full_name"],
-                error=str(e),
+        if not _is_not_found(e):
+            logger.warning(
+                "Could not list the repository's broadcasts, will retry",
+                exc_info=True,
             )
-            return
+            return _RepoLoadResult(failed=True)
+        # The broadcasts directory does not exist at the commit.
+        paths = []
 
+    result = _RepoLoadResult()
     listed_ids = set()
+    failed_paths = set()
     for path in paths:
-        message_ref = GitHubMessageRef.from_push_event(path=path, event=event)
+        message_ref = GitHubMessageRef.from_repository(
+            path=path, repository=repository, ref=ref
+        )
         listed_ids.add(message_ref.as_id())
-        await _reconcile_file_at_commit(
+        outcome = await _reconcile_file_at_commit(
             file_path=path,
             message_ref=message_ref,
             contents_url=repository["contents_url"],
@@ -392,18 +526,30 @@ async def _reload_repo_broadcasts(
             github_client=github_client,
             logger=logger,
         )
+        match outcome:
+            case _FileOutcome.loaded:
+                result.message_count += 1
+            case _FileOutcome.absent:
+                pass
+            case _FileOutcome.skipped:
+                result.skipped_file_count += 1
+            case _FileOutcome.failed:
+                result.failed = True
+                failed_paths.add(path)
 
     for message_ref in get_repo_message_refs(
-        broadcast_repo=broadcast_repo, repo_full_name=repository["full_name"]
+        broadcast_repo=broadcast_repo, repo_full_name=full_name
     ):
         message_id = message_ref.as_id()
-        if message_id not in listed_ids:
-            broadcast_repo.remove(message_id)
-            logger.debug(
-                "Removed message that is not in the default branch",
-                message_id=message_id,
-                git_ref=head_sha,
-            )
+        if message_id in listed_ids or message_ref.path in failed_paths:
+            continue
+        broadcast_repo.remove(message_id)
+        logger.debug(
+            "Removed message that is not in the default branch",
+            message_id=message_id,
+            git_ref=head_sha,
+        )
+    return result
 
 
 async def _reconcile_file_at_commit(
@@ -415,13 +561,15 @@ async def _reconcile_file_at_commit(
     broadcast_repo: BroadcastMessageRepository,
     github_client: GitHubAPI,
     logger: BoundLogger,
-) -> None:
+) -> _FileOutcome:
     """Make a broadcast message match its file as it is at a commit.
 
     If the file exists at the commit, its message is added or updated (see
     `add_file_to_repository`). If GitHub reports that the file does not
-    exist (404), its message is removed. Any other error is logged and the
-    stored message, if any, is left unchanged.
+    exist (404), its message is removed. Otherwise, the stored message, if
+    any, is left unchanged and a warning is logged, for a GitHub failure
+    (see `_is_github_failure`) as for any other error, such as malformed
+    content.
 
     Parameters
     ----------
@@ -439,9 +587,14 @@ async def _reconcile_file_at_commit(
         The GitHub API client, pre-authorized as an app installation.
     logger
         The logger instance
+
+    Returns
+    -------
+    _FileOutcome
+        What became of the file's message.
     """
     try:
-        await add_file_to_repository(
+        message = await add_file_to_repository(
             file_path=file_path,
             message_ref=message_ref,
             contents_url=contents_url,
@@ -450,15 +603,8 @@ async def _reconcile_file_at_commit(
             logger=logger,
             git_ref=git_ref,
         )
-    except RateLimitExceeded as e:
-        logger.exception(
-            "GitHub rate limit exception",
-            limit=e.rate_limit.limit,
-            remaining=e.rate_limit.remaining,
-            resets_at=e.rate_limit.reset_datetime,
-        )
-    except BadRequest as e:
-        if e.status_code == HTTPStatus.NOT_FOUND:
+    except Exception as e:
+        if _is_not_found(e):
             message_id = message_ref.as_id()
             broadcast_repo.remove(message_id)
             logger.debug(
@@ -466,12 +612,56 @@ async def _reconcile_file_at_commit(
                 message_id=message_id,
                 git_ref=git_ref,
             )
-        else:
-            logger.exception("GitHub error", error=str(e))
-    except GitHubException as e:
-        logger.exception("GitHub error", error=str(e))
-    except Exception as e:
-        logger.exception("Unknown error", error=str(e))
+            return _FileOutcome.absent
+        if _is_github_failure(e):
+            logger.warning(
+                "Could not read a broadcast file from GitHub, will retry the "
+                "repository",
+                path=file_path,
+                git_ref=git_ref,
+                exc_info=True,
+            )
+            return _FileOutcome.failed
+        logger.warning(
+            "Skipping a broadcast file that could not be loaded",
+            path=file_path,
+            git_ref=git_ref,
+            exc_info=True,
+        )
+        return _FileOutcome.skipped
+    return _FileOutcome.absent if message is None else _FileOutcome.loaded
+
+
+async def get_repository(
+    *, github_client: GitHubAPI, repo_full_name: str
+) -> dict[str, Any]:
+    """Get a GitHub repository's resource, as it is now.
+
+    Parameters
+    ----------
+    github_client
+        The GitHub API client, pre-authorized as an app installation that
+        can see the repository.
+    repo_full_name
+        Full name (``owner/repo``) of the repository.
+
+    Returns
+    -------
+    dict
+        The repository resource from the GitHub v3 API, with the
+        repository's current ``default_branch``.
+
+    Raises
+    ------
+    GitHubException
+        Raised if there is an issue with GitHub, including a 404 (as
+        `~gidgethub.BadRequest`) if the repository does not exist or the
+        installation cannot see it.
+    """
+    owner, repo = repo_full_name.split("/", maxsplit=1)
+    return await github_client.getitem(
+        "/repos/{owner}/{repo}", url_vars={"owner": owner, "repo": repo}
+    )
 
 
 async def get_branch_head_sha(
@@ -510,7 +700,7 @@ async def get_branch_head_sha(
 
 
 def _integrate_file_changes_in_commits(
-    commits: Sequence[dict[str, Any]],
+    commits: Iterable[dict[str, Any]],
 ) -> tuple[set[str], set[str]]:
     """Integrate the file changes from the sequence of individual commits
     to determine the overall set of added/modified and removed files.
@@ -661,50 +851,14 @@ async def add_file_to_repository(
     return broadcast_message
 
 
-@dataclasses.dataclass(frozen=True)
-class FailedRepo:
-    """A repository whose broadcasts GitHub failed to return, which must be
-    loaded again.
-    """
-
-    installation_id: str
-    """ID of the GitHub App installation that can see the repository."""
-
-    github_repo: dict[str, Any]
-    """The repository resource from the GitHub v3 API."""
-
-    @property
-    def full_name(self) -> str:
-        """Full name (``owner/repo``) of the repository."""
-        return self.github_repo["full_name"]
-
-
-@dataclasses.dataclass(frozen=True)
-class FailedInstallation:
-    """A GitHub App installation that GitHub failed to authorize, or whose
-    repositories GitHub failed to list, which must be loaded again.
-    """
-
-    installation_id: str
-    """ID of the GitHub App installation."""
-
-    account: str
-    """Login of the user or organization that the installation is on."""
-
-
-type BootstrapFailure = FailedRepo | FailedInstallation
-"""What GitHub failed to return when broadcasts were loaded at startup, which
-`retry_bootstrap_failures` loads again.
-"""
-
-
 async def bootstrap_broadcast_repo(
     *,
     http_client: httpx.AsyncClient,
     broadcast_repo: BroadcastMessageRepository,
     source_policy: BroadcastSourcePolicy,
+    reload_queue: ReloadQueue,
     logger: BoundLogger,
-) -> list[BootstrapFailure]:
+) -> None:
     """Bootstrap data in the broadcast repo from GitHub repositories that the
     GitHub app has access to.
 
@@ -719,20 +873,21 @@ async def bootstrap_broadcast_repo(
     Neither content nor GitHub errors stop startup:
 
     - If GitHub fails to authorize an installation or to list its
-      repositories, the installation is logged with a warning and returned,
-      so that it can be loaded again with `retry_bootstrap_failures`. The
-      other installations are still loaded.
+      repositories, the installation is logged with a warning and added to
+      ``reload_queue``, so that the reload worker loads its repositories
+      once GitHub recovers (see `run_reload_worker`). The other
+      installations are still loaded.
     - In an allowed repository (see `_load_repo_broadcasts`), a broadcast
       file that is malformed is skipped with a warning, and a repository
       without a broadcasts directory has no broadcasts. A repository that
       GitHub fails to list, or one of whose files GitHub fails to return, is
-      logged with a warning and returned, to be loaded again; the messages
-      of its other files are kept.
+      logged with a warning and added to ``reload_queue``, to be reloaded in
+      full; the messages of its other files are kept.
 
     At the end, a summary of what was loaded is logged. Then a warning lists
     the allowed repositories that no installation can see, as when a name is
     misspelled or the app is not installed on the repository. The
-    repositories of the accounts whose installations are returned are left
+    repositories of the accounts whose installations were queued are left
     out of it, since what those installations can see is not known yet.
 
     Parameters
@@ -743,24 +898,16 @@ async def bootstrap_broadcast_repo(
         The broadcast message repository.
     source_policy
         The policy for which repositories may publish broadcast messages.
+    reload_queue
+        The queue of repositories and installations whose broadcasts must be
+        reloaded, to add what GitHub fails to return to.
     logger
         The logger instance.
-
-    Returns
-    -------
-    list of BootstrapFailure
-        The installations, and then the repositories, that GitHub failed to
-        return, each in the order they were loaded. Empty if everything was
-        loaded.
     """
     github_client = create_github_client(http_client=http_client)
     jwt = get_app_jwt()
-    seen_repos: list[str] = []
-    repo_count = 0
-    message_count = 0
-    skipped_file_count = 0
-    failed_installations: list[FailedInstallation] = []
-    failed_repos: list[FailedRepo] = []
+    totals = _InstallationLoadResult()
+    failed_accounts: list[str] = []
     async for installation in iter_installations(
         github_client=github_client, jwt=jwt
     ):
@@ -787,7 +934,7 @@ async def bootstrap_broadcast_repo(
                 http_client=http_client,
                 broadcast_repo=broadcast_repo,
                 source_policy=source_policy,
-                repo_locks=None,
+                reload_queue=reload_queue,
                 logger=installation_logger,
             )
         except Exception:
@@ -796,38 +943,32 @@ async def bootstrap_broadcast_repo(
                 "repositories, will retry",
                 exc_info=True,
             )
-            failed_installations.append(
-                FailedInstallation(
-                    installation_id=installation_id, account=account
-                )
+            reload_queue.add_installation(
+                installation_id=installation_id, account=account
             )
+            failed_accounts.append(account)
             continue
-        seen_repos.extend(result.seen_repos)
-        repo_count += result.repo_count
-        message_count += result.message_count
-        skipped_file_count += result.skipped_file_count
-        failed_repos.extend(result.failed_repos)
+        totals.add_installation_result(result)
 
     logger.info(
         "Loaded broadcasts from GitHub",
         github_repos=source_policy.allowed_repos,
-        repo_count=repo_count,
-        failed_installation_count=len(failed_installations),
-        failed_repo_count=len(failed_repos),
-        message_count=message_count,
-        skipped_file_count=skipped_file_count,
+        repo_count=totals.repo_count,
+        failed_installation_count=len(failed_accounts),
+        failed_repo_count=totals.failed_repo_count,
+        message_count=totals.message_count,
+        skipped_file_count=totals.skipped_file_count,
     )
     unseen_repos = _get_unseen_repos(
         source_policy=source_policy,
-        seen_repos=seen_repos,
-        unknown_accounts=[f.account for f in failed_installations],
+        seen_repos=totals.seen_repos,
+        unknown_accounts=failed_accounts,
     )
     if unseen_repos:
         logger.warning(
             "No GitHub App installation can see these allowed repositories",
             github_repos=unseen_repos,
         )
-    return [*failed_installations, *failed_repos]
 
 
 def _get_installation_account(installation: dict[str, Any]) -> str | None:
@@ -891,17 +1032,22 @@ def _get_unseen_repos(
 @dataclasses.dataclass
 class _InstallationLoadResult:
     """The outcome of loading the broadcast messages in the repositories of
-    one GitHub App installation.
+    one or more GitHub App installations.
     """
 
     seen_repos: list[str] = dataclasses.field(default_factory=list)
-    """Full names of the repositories that the installation can see, allowed
-    or not.
+    """Full names of the repositories that the installations can see,
+    allowed or not.
     """
 
     repo_count: int = 0
     """Number of allowed repositories that loaded, including those without
     broadcasts.
+    """
+
+    failed_repo_count: int = 0
+    """Number of allowed repositories that GitHub failed to return, which
+    were added to the reload queue.
     """
 
     message_count: int = 0
@@ -912,28 +1058,31 @@ class _InstallationLoadResult:
     loaded.
     """
 
-    failed_repos: list[FailedRepo] = dataclasses.field(default_factory=list)
-    """The allowed repositories that GitHub failed to return, which must be
-    loaded again.
-    """
+    def add_repo_result(self, repo_result: _RepoLoadResult) -> None:
+        """Count what was loaded from one allowed repository."""
+        self.message_count += repo_result.message_count
+        self.skipped_file_count += repo_result.skipped_file_count
+        if repo_result.failed:
+            self.failed_repo_count += 1
+        else:
+            self.repo_count += 1
+
+    def add_installation_result(self, result: Self) -> None:
+        """Count what was loaded from the repositories of another
+        installation.
+        """
+        self.seen_repos.extend(result.seen_repos)
+        self.repo_count += result.repo_count
+        self.failed_repo_count += result.failed_repo_count
+        self.message_count += result.message_count
+        self.skipped_file_count += result.skipped_file_count
 
 
-async def _load_installation(
-    *,
-    installation_id: str,
-    http_client: httpx.AsyncClient,
-    broadcast_repo: BroadcastMessageRepository,
-    source_policy: BroadcastSourcePolicy,
-    repo_locks: RepoLocks | None,
-    logger: BoundLogger,
-) -> _InstallationLoadResult:
-    """Load the broadcast messages in the allowed repositories that a GitHub
-    App installation can see.
-
-    The installation's repositories are listed in full with a new client
-    authorized as the installation. A repository that ``source_policy``
-    rejects is skipped with a warning. Each allowed repository is then
-    loaded (see `_load_repo_broadcasts`).
+async def _list_installation_repos(
+    *, installation_id: str, http_client: httpx.AsyncClient
+) -> tuple[GitHubAPI, list[dict[str, Any]]]:
+    """Authorize a GitHub App installation and list, in full, the
+    repositories that it can see.
 
     Parameters
     ----------
@@ -941,30 +1090,18 @@ async def _load_installation(
         ID of the GitHub App installation.
     http_client
         The httpx client.
-    broadcast_repo
-        The broadcast message repository.
-    source_policy
-        The policy for which repositories may publish broadcast messages.
-    repo_locks
-        The per-repository locks of broadcast sources, to load each
-        repository under its lock so that loading it does not interleave
-        with a push to it. `None` to load without locks, as at startup,
-        before any push is processed.
-    logger
-        The logger instance.
 
     Returns
     -------
-    _InstallationLoadResult
-        What was loaded from the installation's repositories, and which of
-        them failed.
+    tuple
+        A new client authorized as the installation, and the repository
+        resources from the GitHub v3 API.
 
     Raises
     ------
     Exception
         Raised if the installation cannot be authorized or its repositories
-        cannot be listed, as when GitHub fails or cannot be reached. None of
-        the installation's repositories has been loaded then.
+        cannot be listed, as when GitHub fails or cannot be reached.
     """
     # A new client each time, since an installation's token expires after an
     # hour.
@@ -980,81 +1117,166 @@ async def _load_installation(
             github_client=github_client
         )
     ]
-    result = _InstallationLoadResult()
+    return github_client, github_repos
+
+
+def _get_seen_repos(github_repos: Iterable[dict[str, Any]]) -> list[str]:
+    """Get the full names of the repositories that an installation lists."""
+    return [
+        full_name
+        for github_repo in github_repos
+        if isinstance(full_name := github_repo.get("full_name"), str)
+    ]
+
+
+def _filter_allowed_repos(
+    github_repos: Iterable[dict[str, Any]],
+    *,
+    source_policy: BroadcastSourcePolicy,
+    logger: BoundLogger,
+) -> list[dict[str, Any]]:
+    """Keep the repositories that may publish broadcasts, skipping each
+    other one with a warning.
+
+    Parameters
+    ----------
+    github_repos
+        Repository resources from the GitHub v3 API.
+    source_policy
+        The policy for which repositories may publish broadcast messages.
+    logger
+        The logger instance.
+
+    Returns
+    -------
+    list of dict
+        The repositories that ``source_policy`` allows, in order.
+    """
+    allowed = []
     for github_repo in github_repos:
-        full_name = github_repo.get("full_name")
-        if isinstance(full_name, str):
-            result.seen_repos.append(full_name)
         decision = source_policy.evaluate(github_repo)
         if not decision.allowed:
             logger.warning(
                 "Skipping a repository that may not publish broadcasts",
-                github_repo=full_name,
+                github_repo=github_repo.get("full_name"),
                 reason=decision.reason,
             )
             continue
-        repo_lock: AbstractAsyncContextManager[object] = (
-            nullcontext()
-            if repo_locks is None
-            else repo_locks.get(github_repo["full_name"])
+        allowed.append(github_repo)
+    return allowed
+
+
+async def _load_installation(
+    *,
+    installation_id: str,
+    http_client: httpx.AsyncClient,
+    broadcast_repo: BroadcastMessageRepository,
+    source_policy: BroadcastSourcePolicy,
+    reload_queue: ReloadQueue,
+    logger: BoundLogger,
+) -> _InstallationLoadResult:
+    """Load, at startup, the broadcast messages in the allowed repositories
+    that a GitHub App installation can see.
+
+    The installation's repositories are listed in full with a new client
+    authorized as the installation. A repository that ``source_policy``
+    rejects is skipped with a warning. Each allowed repository is then
+    loaded (see `_load_repo_broadcasts`), without its lock, since no push is
+    processed before startup completes. A repository that GitHub fails to
+    return is added to ``reload_queue``.
+
+    Parameters
+    ----------
+    installation_id
+        ID of the GitHub App installation.
+    http_client
+        The httpx client.
+    broadcast_repo
+        The broadcast message repository.
+    source_policy
+        The policy for which repositories may publish broadcast messages.
+    reload_queue
+        The queue of repositories whose broadcasts must be reloaded.
+    logger
+        The logger instance.
+
+    Returns
+    -------
+    _InstallationLoadResult
+        What was loaded from the installation's repositories.
+
+    Raises
+    ------
+    Exception
+        Raised if the installation cannot be authorized or its repositories
+        cannot be listed, as when GitHub fails or cannot be reached. None of
+        the installation's repositories has been loaded then.
+    """
+    github_client, github_repos = await _list_installation_repos(
+        installation_id=installation_id, http_client=http_client
+    )
+    result = _InstallationLoadResult(seen_repos=_get_seen_repos(github_repos))
+    for github_repo in _filter_allowed_repos(
+        github_repos, source_policy=source_policy, logger=logger
+    ):
+        repo_result = await _load_repo_broadcasts(
+            github_repo=github_repo,
+            broadcast_repo=broadcast_repo,
+            github_client=github_client,
+            logger=logger,
         )
-        async with repo_lock:
-            repo_result = await _load_repo_broadcasts(
-                github_repo=github_repo,
-                broadcast_repo=broadcast_repo,
-                github_client=github_client,
-                logger=logger,
-            )
-        result.message_count += repo_result.message_count
-        result.skipped_file_count += repo_result.skipped_file_count
+        result.add_repo_result(repo_result)
         if repo_result.failed:
-            result.failed_repos.append(
-                FailedRepo(
-                    installation_id=installation_id, github_repo=github_repo
-                )
+            reload_queue.add_repo(
+                installation_id=installation_id,
+                repo_full_name=github_repo["full_name"],
             )
-        else:
-            result.repo_count += 1
     return result
 
 
-async def retry_bootstrap_failures(
+async def run_reload_worker(
     *,
-    failures: Sequence[BootstrapFailure],
+    reload_queue: ReloadQueue,
     http_client: httpx.AsyncClient,
     broadcast_repo: BroadcastMessageRepository,
     source_policy: BroadcastSourcePolicy,
     repo_locks: RepoLocks,
     logger: BoundLogger,
 ) -> None:
-    """Load again the installations and repositories that GitHub failed to
-    return at startup, until each one loads.
+    """Reload the broadcasts of the repositories and installations in the
+    reload queue, for as long as the app runs.
 
-    This is meant to run as a background task, so that startup does not
-    wait for GitHub to recover. Each attempt waits first, for
+    This is meant to run as one background task for the life of the app,
+    which both the startup bootstrap and the push webhook feed through
+    ``reload_queue``. Each process reloads for its own broadcast repository.
+
+    The worker waits until the queue has an entry. Then it makes attempts
+    until the queue is empty, each one after a wait, for
     `BOOTSTRAP_RETRY_INITIAL_DELAY` seconds and then twice as long after
-    each attempt, up to `BOOTSTRAP_RETRY_MAX_DELAY`. Then it loads each
-    failure that is still pending, with a new client authorized as its
-    installation, and each repository under the repository's lock, so that
-    it does not interleave with a push to the repository:
+    each attempt, up to `BOOTSTRAP_RETRY_MAX_DELAY`. Once the queue is
+    empty, the next entry starts the waits again from the initial delay.
 
-    - A failed installation is loaded as at startup (see
-      `_load_installation`): its repositories are listed and those that
-      ``source_policy`` allows are loaded. If GitHub fails again to
-      authorize it or to list its repositories, it is tried again in the
-      next attempt. A repository of it that GitHub fails to return is tried
-      again in the next attempt, as a failed repository.
-    - A failed repository is loaded in full, as at startup (see
-      `_load_repo_broadcasts`). If it fails again, including because its
-      installation cannot be authorized, it is tried again in the next
-      attempt.
+    Each attempt tries once each entry that was pending when it started,
+    with a new client authorized as the entry's installation:
 
-    The function returns once everything has loaded.
+    - A repository is reloaded under its lock (see `_reload_queued_repo`).
+      It leaves the queue once it reloads, or if GitHub no longer has it or
+      ``source_policy`` no longer allows it. Otherwise it is tried again in
+      the next attempt.
+    - An installation, which GitHub failed to authorize or to list the
+      repositories of at startup, is authorized and its repositories are
+      listed. If that fails, it is tried again in the next attempt.
+      Otherwise, each repository that ``source_policy`` allows is reloaded
+      under its lock, and one that fails is added to the queue as a
+      repository, before the installation leaves the queue.
+
+    The function returns only when the task is cancelled.
 
     Parameters
     ----------
-    failures
-        What to load, as returned by `bootstrap_broadcast_repo`.
+    reload_queue
+        The queue of repositories and installations whose broadcasts must be
+        reloaded.
     http_client
         The httpx client.
     broadcast_repo
@@ -1066,43 +1288,41 @@ async def retry_bootstrap_failures(
     logger
         The logger instance.
     """
-    pending = list(failures)
-    delays = _iter_retry_delays()
-    attempt = 0
-    while pending:
-        await asyncio.sleep(next(delays))
-        attempt += 1
-        still_failed: list[BootstrapFailure] = []
-        for failure in pending:
-            if isinstance(failure, FailedInstallation):
-                still_failed.extend(
+    while True:
+        await reload_queue.wait_for_pending()
+        delays = _iter_retry_delays()
+        attempt = 0
+        while len(reload_queue) > 0:
+            await asyncio.sleep(next(delays))
+            attempt += 1
+            for entry in reload_queue.pending():
+                if isinstance(entry, QueuedInstallation):
                     await _retry_installation(
-                        failed_installation=failure,
+                        entry=entry,
                         attempt=attempt,
                         http_client=http_client,
                         broadcast_repo=broadcast_repo,
                         source_policy=source_policy,
                         repo_locks=repo_locks,
+                        reload_queue=reload_queue,
                         logger=logger,
                     )
-                )
-                continue
-            loaded = await _retry_repo(
-                failed_repo=failure,
-                attempt=attempt,
-                http_client=http_client,
-                broadcast_repo=broadcast_repo,
-                repo_locks=repo_locks,
-                logger=logger,
-            )
-            if not loaded:
-                still_failed.append(failure)
-        pending = still_failed
+                else:
+                    await _retry_repo(
+                        entry=entry,
+                        attempt=attempt,
+                        http_client=http_client,
+                        broadcast_repo=broadcast_repo,
+                        source_policy=source_policy,
+                        repo_locks=repo_locks,
+                        reload_queue=reload_queue,
+                        logger=logger,
+                    )
 
 
 def _iter_retry_delays() -> Iterator[float]:
     """Iterate over the seconds to wait before each attempt of
-    `retry_bootstrap_failures`: an exponential backoff that is capped.
+    `run_reload_worker`: an exponential backoff that is capped.
     """
     delay = BOOTSTRAP_RETRY_INITIAL_DELAY
     while True:
@@ -1112,23 +1332,25 @@ def _iter_retry_delays() -> Iterator[float]:
 
 async def _retry_installation(
     *,
-    failed_installation: FailedInstallation,
+    entry: QueuedInstallation,
     attempt: int,
     http_client: httpx.AsyncClient,
     broadcast_repo: BroadcastMessageRepository,
     source_policy: BroadcastSourcePolicy,
     repo_locks: RepoLocks,
+    reload_queue: ReloadQueue,
     logger: BoundLogger,
-) -> list[BootstrapFailure]:
-    """Try once to load a GitHub App installation that GitHub failed to
-    authorize, or whose repositories GitHub failed to list.
+) -> None:
+    """Try once to load the repositories of a GitHub App installation in the
+    reload queue.
 
     Parameters
     ----------
-    failed_installation
-        The installation to load.
+    entry
+        The installation's entry in the reload queue.
     attempt
-        Number of the attempt of `retry_bootstrap_failures`, starting at 1.
+        Number of the attempt of `run_reload_worker` since the queue was
+        last empty, starting at 1.
     http_client
         The httpx client.
     broadcast_repo
@@ -1137,29 +1359,21 @@ async def _retry_installation(
         The policy for which repositories may publish broadcast messages.
     repo_locks
         The per-repository locks of broadcast sources.
+    reload_queue
+        The queue of repositories and installations whose broadcasts must be
+        reloaded.
     logger
         The logger instance.
-
-    Returns
-    -------
-    list of BootstrapFailure
-        What is still to be loaded: the installation, if it failed again, or
-        else its repositories that GitHub failed to return.
     """
     logger = logger.bind(
-        installation_id=failed_installation.installation_id,
-        github_account=failed_installation.account,
+        installation_id=entry.installation_id,
+        github_account=entry.account,
         attempt=attempt,
     )
     logger.info("Retrying loading broadcasts from a GitHub App installation")
     try:
-        result = await _load_installation(
-            installation_id=failed_installation.installation_id,
-            http_client=http_client,
-            broadcast_repo=broadcast_repo,
-            source_policy=source_policy,
-            repo_locks=repo_locks,
-            logger=logger,
+        github_client, github_repos = await _list_installation_repos(
+            installation_id=entry.installation_id, http_client=http_client
         )
     except Exception:
         logger.warning(
@@ -1167,78 +1381,236 @@ async def _retry_installation(
             "repositories, will retry",
             exc_info=True,
         )
-        return [failed_installation]
+        return
+
+    result = _InstallationLoadResult()
+    for github_repo in _filter_allowed_repos(
+        github_repos, source_policy=source_policy, logger=logger
+    ):
+        full_name = github_repo["full_name"]
+        async with repo_locks.get(full_name):
+            try:
+                repo_result = await _reload_repo_at_default_branch(
+                    github_repo=github_repo,
+                    broadcast_repo=broadcast_repo,
+                    github_client=github_client,
+                    logger=logger,
+                )
+            except Exception:
+                logger.warning(
+                    "Could not load the repository's broadcasts, will retry",
+                    github_repo=full_name,
+                    exc_info=True,
+                )
+                repo_result = _RepoLoadResult(failed=True)
+            if repo_result.failed:
+                reload_queue.add_repo(
+                    installation_id=entry.installation_id,
+                    repo_full_name=full_name,
+                )
+        result.add_repo_result(repo_result)
+    reload_queue.discard(entry)
     logger.info(
         "Loaded broadcasts from a GitHub App installation after retrying",
         repo_count=result.repo_count,
-        failed_repo_count=len(result.failed_repos),
+        failed_repo_count=result.failed_repo_count,
         message_count=result.message_count,
         skipped_file_count=result.skipped_file_count,
     )
-    return list(result.failed_repos)
 
 
 async def _retry_repo(
     *,
-    failed_repo: FailedRepo,
+    entry: QueuedRepo,
     attempt: int,
     http_client: httpx.AsyncClient,
     broadcast_repo: BroadcastMessageRepository,
+    source_policy: BroadcastSourcePolicy,
     repo_locks: RepoLocks,
+    reload_queue: ReloadQueue,
     logger: BoundLogger,
-) -> bool:
-    """Try once to load a repository that GitHub failed to return.
+) -> None:
+    """Try once to reload a repository in the reload queue, and remove it
+    from the queue if it reloads or must no longer be reloaded.
 
     Parameters
     ----------
-    failed_repo
-        The repository to load.
+    entry
+        The repository's entry in the reload queue.
     attempt
-        Number of the attempt of `retry_bootstrap_failures`, starting at 1.
+        Number of the attempt of `run_reload_worker` since the queue was
+        last empty, starting at 1.
     http_client
         The httpx client.
     broadcast_repo
         The broadcast message repository.
+    source_policy
+        The policy for which repositories may publish broadcast messages.
     repo_locks
         The per-repository locks of broadcast sources.
+    reload_queue
+        The queue of repositories and installations whose broadcasts must be
+        reloaded.
     logger
         The logger instance.
-
-    Returns
-    -------
-    bool
-        Whether the repository loaded, rather than failing again.
     """
-    logger = logger.bind(github_repo=failed_repo.full_name, attempt=attempt)
+    logger = logger.bind(github_repo=entry.full_name, attempt=attempt)
     logger.info("Retrying loading broadcasts from a repository")
     try:
         # A new client for each attempt, since an installation's token
         # expires after an hour.
         github_client = await create_github_installation_client(
-            http_client=http_client,
-            installation_id=failed_repo.installation_id,
+            http_client=http_client, installation_id=entry.installation_id
         )
-        async with repo_locks.get(failed_repo.full_name):
-            result = await _load_repo_broadcasts(
-                github_repo=failed_repo.github_repo,
+        async with repo_locks.get(entry.full_name):
+            result = await _reload_queued_repo(
+                entry=entry,
                 broadcast_repo=broadcast_repo,
                 github_client=github_client,
+                source_policy=source_policy,
                 logger=logger,
             )
+            # Removed under the lock, so that a push that fails after the
+            # reload queues the repository again.
+            if result is None or not result.failed:
+                reload_queue.discard(entry)
     except Exception:
         logger.warning(
             "Could not load the repository's broadcasts, will retry",
             exc_info=True,
         )
-        return False
-    if result.failed:
-        return False
-    logger.info(
-        "Loaded broadcasts from a repository after retrying",
-        message_count=result.message_count,
-        skipped_file_count=result.skipped_file_count,
+        return
+    if result is not None and not result.failed:
+        logger.info(
+            "Loaded broadcasts from a repository after retrying",
+            message_count=result.message_count,
+            skipped_file_count=result.skipped_file_count,
+        )
+
+
+async def _reload_queued_repo(
+    *,
+    entry: QueuedRepo,
+    broadcast_repo: BroadcastMessageRepository,
+    github_client: GitHubAPI,
+    source_policy: BroadcastSourcePolicy,
+    logger: BoundLogger,
+) -> _RepoLoadResult | None:
+    """Reload a repository in the reload queue from its current default
+    branch.
+
+    The caller holds the repository's lock. The repository is fetched again,
+    for its current default branch and to evaluate it with
+    ``source_policy`` again. If GitHub does not find it (404), or the policy
+    no longer allows it, it is not reloaded and a warning is logged.
+    Otherwise it is reloaded in full from the head of its default branch
+    (see `_reload_repo_at_default_branch`).
+
+    Parameters
+    ----------
+    entry
+        The repository's entry in the reload queue.
+    broadcast_repo
+        The broadcast message repository.
+    github_client
+        The GitHub API client, pre-authorized as the entry's installation.
+    source_policy
+        The policy for which repositories may publish broadcast messages.
+    logger
+        The logger instance.
+
+    Returns
+    -------
+    _RepoLoadResult or None
+        What was loaded from the repository, and whether GitHub failed, or
+        `None` if the repository must no longer be reloaded.
+
+    Raises
+    ------
+    Exception
+        Raised if GitHub fails to return the repository or its default
+        branch's head.
+    """
+    try:
+        github_repo = await get_repository(
+            github_client=github_client, repo_full_name=entry.full_name
+        )
+    except Exception as e:
+        if not _is_not_found(e):
+            raise
+        logger.warning(
+            "Dropping a repository that GitHub cannot find from the reload "
+            "queue"
+        )
+        return None
+    decision = source_policy.evaluate(github_repo)
+    if not decision.allowed:
+        logger.warning(
+            "Dropping a repository that may not publish broadcasts from the "
+            "reload queue",
+            reason=decision.reason,
+        )
+        return None
+    return await _reload_repo_at_default_branch(
+        github_repo=github_repo,
+        broadcast_repo=broadcast_repo,
+        github_client=github_client,
+        logger=logger,
     )
-    return True
+
+
+async def _reload_repo_at_default_branch(
+    *,
+    github_repo: Mapping[str, Any],
+    broadcast_repo: BroadcastMessageRepository,
+    github_client: GitHubAPI,
+    logger: BoundLogger,
+) -> _RepoLoadResult:
+    """Reload a repository's broadcasts in full from the head of its default
+    branch.
+
+    The caller holds the repository's lock. The head of the repository's
+    ``default_branch`` is looked up, and the repository's messages are made
+    to match its broadcast files at that commit, under the branch's ref (see
+    `_reload_repo_broadcasts`). So a file that was removed, or a message
+    stored under a former default branch, stops being served.
+
+    Parameters
+    ----------
+    github_repo
+        The repository resource from the GitHub v3 API.
+    broadcast_repo
+        The broadcast message repository.
+    github_client
+        The GitHub API client, pre-authorized as an app installation that
+        can see the repository.
+    logger
+        The logger instance.
+
+    Returns
+    -------
+    _RepoLoadResult
+        What was loaded from the repository, and whether GitHub failed.
+
+    Raises
+    ------
+    Exception
+        Raised if GitHub fails to return the default branch's head.
+    """
+    branch = github_repo["default_branch"]
+    head_sha = await get_branch_head_sha(
+        github_client=github_client,
+        repo_full_name=github_repo["full_name"],
+        branch=branch,
+    )
+    return await _reload_repo_broadcasts(
+        repository=github_repo,
+        ref=f"refs/heads/{branch}",
+        head_sha=head_sha,
+        broadcast_repo=broadcast_repo,
+        github_client=github_client,
+        logger=logger,
+    )
 
 
 @dataclasses.dataclass
@@ -1266,7 +1638,8 @@ async def _load_repo_broadcasts(
     github_client: GitHubAPI,
     logger: BoundLogger,
 ) -> _RepoLoadResult:
-    """Load the broadcast messages in a GitHub repository's default branch.
+    """Load the broadcast messages in a GitHub repository's default branch,
+    at startup.
 
     Errors are handled by whether loading the repository again could fix
     them (see `_is_github_failure`):
