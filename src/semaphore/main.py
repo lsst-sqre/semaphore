@@ -1,8 +1,9 @@
 """Semaphore FastAPI application."""
 
+import asyncio
 import json
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from importlib.metadata import version
 
 import structlog
@@ -21,7 +22,13 @@ from safir.slack.webhook import SlackRouteErrorHandler
 from . import __version__
 from .config import config
 from .dependencies.broadcastrepo import broadcast_repo_dependency
-from .github.broadcastservices import bootstrap_broadcast_repo
+from .dependencies.reloadqueue import reload_queue_dependency
+from .dependencies.repolocks import repo_locks_dependency
+from .github.broadcastservices import (
+    bootstrap_broadcast_repo,
+    run_reload_worker,
+)
+from .github.sourcepolicy import BroadcastSourcePolicy
 from .handlers.external import external_router
 from .handlers.internal import internal_router
 from .handlers.v1 import v1_router
@@ -56,15 +63,47 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Initialize the broadcast GitHub repository.
     broadcast_repo = await broadcast_repo_dependency()
+    reload_task: asyncio.Task[None] | None = None
+    if config.github_app_disabled_reason:
+        logger.warning(
+            "GitHub App is disabled", reason=config.github_app_disabled_reason
+        )
     if config.enable_github_app:
+        http_client = await http_client_dependency()
+        source_policy = BroadcastSourcePolicy.from_config(config)
+        reload_queue = await reload_queue_dependency()
         await bootstrap_broadcast_repo(
-            http_client=await http_client_dependency(),
+            http_client=http_client,
             broadcast_repo=broadcast_repo,
+            source_policy=source_policy,
+            reload_queue=reload_queue,
             logger=logger,
         )
+        # Startup does not wait for GitHub to recover. The worker reloads
+        # what failed at startup, and what fails while a push is processed,
+        # for this process's own broadcast repository.
+        reload_task = asyncio.create_task(
+            run_reload_worker(
+                reload_queue=reload_queue,
+                http_client=http_client,
+                broadcast_repo=broadcast_repo,
+                source_policy=source_policy,
+                repo_locks=await repo_locks_dependency(),
+                logger=logger,
+            ),
+            name="github-reload-worker",
+        )
+    # The reload worker's task, if the GitHub App is enabled, is kept on the
+    # app's state so that it can be inspected (as by tests).
+    app.state.github_reload_task = reload_task
 
     yield
 
+    if reload_task is not None:
+        # Stopped before the HTTP client it uses is closed.
+        reload_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await reload_task
     await db_session_dependency.aclose()
     await http_client_dependency.aclose()
 

@@ -49,11 +49,14 @@ def _check_service_identity(service: str, context: RequestContext) -> None:
     description="List broadcast messages.",
     tags=["broadcasts"],
 )
-def get_broadcasts(
+async def get_broadcasts(
     broadcast_repo: Annotated[
         BroadcastMessageRepository, Depends(broadcast_repo_dependency)
     ],
 ) -> list[BroadcastMessageModel]:
+    # This handler must be async and must not await. FastAPI runs a sync
+    # handler in a worker thread, where iterating the repository while the
+    # event loop adds or removes broadcasts raises RuntimeError.
     return [
         BroadcastMessageModel.from_broadcast_message(m)
         for m in broadcast_repo.iter_active()

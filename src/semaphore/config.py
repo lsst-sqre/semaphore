@@ -1,13 +1,27 @@
 """Configuration for Semaphore."""
 
-from typing import Self
+import re
+from typing import Annotated, Any, Self
 
-from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import (
+    Field,
+    PrivateAttr,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from safir.logging import LogLevel, Profile
 from safir.pydantic import EnvAsyncPostgresDsn
 
 __all__ = ["Config", "config"]
+
+_GITHUB_REPO_PATTERN = re.compile(r"^[A-Za-z0-9_-]+/[A-Za-z0-9._-]+$")
+"""Pattern for a GitHub repository full name, ``owner/repo``.
+
+The owner allows underscores because Enterprise Managed User logins, such as
+``mona_acme``, contain one.
+"""
 
 
 class Config(BaseSettings):
@@ -58,6 +72,19 @@ class Config(BaseSettings):
     https://docs.github.com/en/developers/webhooks-and-events/webhooks/securing-your-webhooks
     """
 
+    github_repos: Annotated[list[str], NoDecode] = Field(
+        default_factory=list, validation_alias="SEMAPHORE_GITHUB_REPOS"
+    )
+    """GitHub repositories that may publish broadcast messages.
+
+    Set as a comma-separated list of exact ``owner/repo`` names, such as
+    ``lsst-sqre/rsp_broadcast``. Names are matched case-insensitively and
+    wildcards are not supported. If the GitHub App is otherwise configured
+    but this list is empty, the GitHub App is disabled.
+    """
+
+    _github_app_disabled_reason: str | None = PrivateAttr(default=None)
+
     log_level: LogLevel = Field(LogLevel.INFO, title="Log level")
 
     log_profile: Profile = Field(Profile.production, title="Logging profile")
@@ -104,6 +131,28 @@ class Config(BaseSettings):
         else:
             raise ValueError(f"Value must be None or a string: {v!r}")
 
+    @field_validator("github_repos", mode="before")
+    @classmethod
+    def split_github_repos(cls, v: Any) -> Any:
+        """Split a comma-separated list of repositories, dropping blank
+        entries.
+        """
+        if isinstance(v, str):
+            return [entry.strip() for entry in v.split(",") if entry.strip()]
+        return v
+
+    @field_validator("github_repos")
+    @classmethod
+    def validate_github_repos(cls, v: list[str]) -> list[str]:
+        """Ensure each repository is an exact ``owner/repo`` name."""
+        for entry in v:
+            if not _GITHUB_REPO_PATTERN.match(entry):
+                raise ValueError(
+                    f"{entry!r} is not a GitHub repository name of the form "
+                    "owner/repo (for example, lsst-sqre/rsp_broadcast)"
+                )
+        return v
+
     @model_validator(mode="after")
     def validate_github_app(self) -> Self:
         """Validate ``enable_github_app`` by ensuring that other GitHub
@@ -121,8 +170,29 @@ class Config(BaseSettings):
             or self.github_app_id is None
         ):
             self.enable_github_app = False
+            return self
+
+        # Fail closed: with no allowlist, no repository may publish
+        # broadcasts, so the app is disabled rather than trusting every
+        # repository it can see.
+        if not self.github_repos:
+            self.enable_github_app = False
+            self._github_app_disabled_reason = (
+                "SEMAPHORE_GITHUB_REPOS is not set, so no GitHub repository"
+                " is allowed to publish broadcast messages"
+            )
 
         return self
+
+    @property
+    def github_app_disabled_reason(self) -> str | None:
+        """Why the GitHub App was disabled even though its credentials are
+        set, or `None` if it was not.
+
+        Missing credentials or ``SEMAPHORE_ENABLE_GITHUB_APP=false`` turn the
+        app off on purpose, so they do not set a reason.
+        """
+        return self._github_app_disabled_reason
 
 
 config = Config()

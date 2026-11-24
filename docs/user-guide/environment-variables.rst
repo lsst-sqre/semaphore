@@ -38,6 +38,18 @@ See the `Phalanx documentation for Semaphore <https://phalanx.lsst.io/applicatio
    Can be an empty string if the app is not configured.
    See :ref:`github-app-secrets` for more information.
 
+.. envvar:: SEMAPHORE_GITHUB_REPOS
+
+   (string) Comma-separated list of the GitHub repositories that may publish broadcast messages, each written as ``owner/repo`` (for example, ``lsst-sqre/rsp_broadcast``).
+   Names are matched case-insensitively and wildcards are not supported.
+   A repository that is a fork is never accepted, even if it is listed.
+   Pushes from any other repository are acknowledged, ignored, and logged as a warning.
+
+   This variable is required to use the GitHub App.
+   If the GitHub App credentials are set but this variable is unset or empty, the GitHub App is disabled and a warning is logged at startup.
+   An entry that isn't of the form ``owner/repo`` is a configuration error.
+   See :ref:`github-app-allowlist` for more information.
+
 .. envvar:: SEMAPHORE_GITHUB_WEBHOOK_SECRET
 
    (**secret** string) The GitHub webhook secret for the Semaphore GitHub App.
