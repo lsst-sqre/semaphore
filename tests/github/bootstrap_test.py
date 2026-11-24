@@ -18,6 +18,7 @@ from semaphore.dependencies.reloadqueue import reload_queue_dependency
 from semaphore.github import broadcastservices
 from semaphore.github.reloadqueue import (
     QueuedInstallation,
+    QueuedInstallationListing,
     QueuedRepo,
     ReloadQueue,
 )
@@ -55,6 +56,19 @@ OUTSIDE_OWNER = "someone-else"
 
 OUTSIDE_INSTALLATION_ID = 3456
 """ID of a GitHub App installation on `OUTSIDE_OWNER`."""
+
+PARTNER_OWNER = "rubin-partner"
+"""A second account that owns a repository in the allowlist,
+`PARTNER_REPO`.
+"""
+
+PARTNER_REPO = f"{PARTNER_OWNER}/rsp_broadcast"
+"""A repository in the allowlist, owned by `PARTNER_OWNER`."""
+
+PARTNER_INSTALLATION_ID = 7890
+"""ID of the GitHub App installation, on `PARTNER_OWNER`, that can see
+`PARTNER_REPO`.
+"""
 
 SECOND_REPO = "lsst-sqre/rsp_broadcast_extra"
 """A second repository in the allowlist."""
@@ -96,6 +110,19 @@ listing its repositories.
 
 INSTALLATION_FAILURES: list[InstallationFailure] = ["token", "listing"]
 """Each `InstallationFailure`, to parametrize tests with."""
+
+type ListingFailure = Literal["server_error", "unauthorized", "unreachable"]
+"""How GitHub fails the listing of the app's installations: with a 502
+(``server_error``) or a 401 (``unauthorized``) response, or by not being
+reachable (``unreachable``).
+"""
+
+LISTING_FAILURES: list[ListingFailure] = [
+    "server_error",
+    "unauthorized",
+    "unreachable",
+]
+"""Each `ListingFailure`, to parametrize tests with."""
 
 pytestmark = pytest.mark.usefixtures(
     "empty_database", "broadcast_repo", "repo_locks", "reload_queue"
@@ -303,6 +330,52 @@ def mock_installation_failure(
             [make_repository(repo) for repo in repos],
             installation_id=installation_id,
         )
+
+
+def mock_listing_failure(
+    github_mock: GitHubMock, failure: ListingFailure
+) -> None:
+    """Mock GitHub failing the first request for the list of the app's
+    installations, as `ListingFailure` describes.
+    """
+    match failure:
+        case "server_error":
+            github_mock.mock_installations_error(status_code=502)
+        case "unauthorized":
+            github_mock.mock_installations_error(status_code=401)
+        case "unreachable":
+            github_mock.mock_installations_unreachable()
+
+
+def mock_partner_installations(
+    github_mock: GitHubMock, *, failed_page: int | None = None
+) -> None:
+    """Mock one listing of two installations, one on each page.
+
+    The first page lists the installation on the owner of `GITHUB_REPO` and
+    the second the installation on `PARTNER_OWNER`. If ``failed_page`` is
+    set, GitHub fails that page as `GitHubMock.mock_installations`
+    describes.
+    """
+    github_mock.mock_installations(
+        [
+            make_installation(GITHUB_INSTALLATION_ID),
+            make_installation(PARTNER_INSTALLATION_ID, account=PARTNER_OWNER),
+        ],
+        per_page=1,
+        failed_page=failed_page,
+    )
+
+
+def mock_startup_load(github_mock: GitHubMock) -> None:
+    """Mock loading, at startup, the installation on the owner of
+    `GITHUB_REPO`, which can see only `GITHUB_REPO`, whose broadcast is
+    ``broadcasts/hello.md``.
+    """
+    github_mock.mock_installation_token(GITHUB_INSTALLATION_ID)
+    github_mock.mock_installation_repositories([make_repository(GITHUB_REPO)])
+    github_mock.mock_directory("broadcasts", ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD)
 
 
 def mock_reload_listing(
@@ -995,6 +1068,395 @@ async def test_logs_installation_retries(
             "skipped_file_count": 1,
         },
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", LISTING_FAILURES)
+async def test_starts_when_github_fails_to_list_installations(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: ListingFailure,
+) -> None:
+    configure_github_app(monkeypatch)
+    mock_listing_failure(github_mock, failure)
+
+    async with LifespanManager(main.app):
+        served = await get_served_ids()
+
+    assert served == []
+
+
+@pytest.mark.asyncio
+async def test_warns_about_installation_listing_github_fails(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    configure_github_app(monkeypatch)
+    mock_listing_failure(github_mock, "server_error")
+
+    async with LifespanManager(main.app):
+        pass
+
+    warnings = [
+        log for log in get_logs(caplog) if log["severity"] == "warning"
+    ]
+    assert [w["event"] for w in warnings] == [
+        "Could not list the GitHub App's installations, will retry"
+    ]
+    assert "gidgethub.GitHubBroken" in warnings[0]["exception"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", LISTING_FAILURES)
+async def test_queues_installation_listing_github_fails(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    reload_queue: ReloadQueue,
+    failure: ListingFailure,
+) -> None:
+    configure_github_app(monkeypatch)
+    mock_listing_failure(github_mock, failure)
+
+    async with LifespanManager(main.app):
+        pending = reload_queue.pending()
+
+    assert pending == [QueuedInstallationListing()]
+
+
+@pytest.mark.asyncio
+async def test_loads_installations_listed_before_listing_fails(
+    github_mock: GitHubMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The installations on the pages that GitHub returned before failing
+    are loaded at startup.
+    """
+    configure_github_app(monkeypatch, repos=f"{GITHUB_REPO},{PARTNER_REPO}")
+    mock_partner_installations(github_mock, failed_page=2)
+    mock_startup_load(github_mock)
+
+    async with LifespanManager(main.app):
+        served = await get_served_ids()
+
+    assert served == [make_message_id("broadcasts/hello.md")]
+
+
+@pytest.mark.asyncio
+async def test_logs_summary_when_listing_fails(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    configure_github_app(monkeypatch, repos=f"{GITHUB_REPO},{PARTNER_REPO}")
+    mock_partner_installations(github_mock, failed_page=2)
+    mock_startup_load(github_mock)
+
+    async with LifespanManager(main.app):
+        pass
+
+    assert [
+        (s["repo_count"], s["failed_installation_count"], s["message_count"])
+        for s in get_summaries(caplog)
+    ] == [(1, 0, 1)]
+
+
+@pytest.mark.asyncio
+async def test_does_not_warn_about_unseen_repos_while_listing_fails(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    configure_github_app(
+        monkeypatch, repos=f"{GITHUB_REPO},{PARTNER_REPO},{MISSPELLED_REPO}"
+    )
+    mock_partner_installations(github_mock, failed_page=2)
+    mock_startup_load(github_mock)
+
+    async with LifespanManager(main.app):
+        pass
+
+    assert get_unseen_repo_warnings(caplog) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("no_retry_delay")
+@pytest.mark.parametrize("failure", LISTING_FAILURES)
+async def test_retries_installation_listing(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: ListingFailure,
+) -> None:
+    configure_github_app(monkeypatch)
+    mock_listing_failure(github_mock, failure)
+    github_mock.mock_installations([make_installation()])
+    github_mock.mock_installation_token()
+    github_mock.mock_installation_repositories([make_repository()])
+    mock_reload_listing(github_mock, ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
+
+    async with LifespanManager(main.app):
+        await wait_for_reloads()
+        served = await get_served_ids()
+
+    assert served == [make_message_id("broadcasts/hello.md")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("no_retry_delay")
+async def test_retries_installation_listing_github_fails_again(
+    github_mock: GitHubMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A listing that GitHub fails again stays queued and is tried in the
+    next attempt.
+    """
+    configure_github_app(monkeypatch)
+    github_mock.mock_installations_error(status_code=502, times=2)
+    github_mock.mock_installations([make_installation()])
+    github_mock.mock_installation_token()
+    github_mock.mock_installation_repositories([make_repository()])
+    mock_reload_listing(github_mock, ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
+
+    async with LifespanManager(main.app):
+        await wait_for_reloads()
+        served = await get_served_ids()
+
+    assert served == [make_message_id("broadcasts/hello.md")]
+    assert len(github_mock.get_installations_requests()) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("no_retry_delay")
+async def test_installation_listing_retry_loads_installations_of_every_page(
+    broadcast_repo: BroadcastMessageRepository,
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After a listing that failed on its second page, the installations of
+    every page are loaded, and each broadcast of a repository that loaded at
+    startup is stored once.
+    """
+    configure_github_app(monkeypatch, repos=f"{GITHUB_REPO},{PARTNER_REPO}")
+    mock_partner_installations(github_mock, failed_page=2)
+    mock_startup_load(github_mock)
+    mock_partner_installations(github_mock)
+    github_mock.mock_installation_repositories([make_repository(GITHUB_REPO)])
+    mock_reload_listing(github_mock, ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
+    github_mock.mock_installation_token(PARTNER_INSTALLATION_ID)
+    github_mock.mock_installation_repositories(
+        [make_repository(PARTNER_REPO)],
+        installation_id=PARTNER_INSTALLATION_ID,
+    )
+    github_mock.mock_branch_head(SHA_A, repo=PARTNER_REPO)
+    github_mock.mock_directory(
+        "broadcasts", ["hello.md"], repo=PARTNER_REPO, ref=SHA_A
+    )
+    github_mock.mock_file(
+        "broadcasts/hello.md", HELLO_MD, repo=PARTNER_REPO, ref=SHA_A
+    )
+
+    async with LifespanManager(main.app):
+        await wait_for_reloads()
+        served = await get_served_ids()
+
+    expected = [
+        make_message_id("broadcasts/hello.md"),
+        make_message_id("broadcasts/hello.md", repo=PARTNER_REPO),
+    ]
+    assert sorted(served) == sorted(expected)
+    assert sorted(m.identifier for m in broadcast_repo.iter()) == sorted(
+        expected
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("no_retry_delay")
+async def test_installation_listing_retry_creates_jwt_each_attempt(
+    github_mock: GitHubMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jwts = (f"test-jwt-{number}" for number in itertools.count(1))
+    monkeypatch.setattr(broadcastservices, "get_app_jwt", lambda: next(jwts))
+    configure_github_app(monkeypatch)
+    github_mock.mock_installations_error(status_code=502, times=2)
+    github_mock.mock_installations([])
+
+    async with LifespanManager(main.app):
+        await wait_for_reloads()
+
+    # One JWT at startup, then one for each of the worker's two attempts.
+    assert [
+        r.headers["authorization"]
+        for r in github_mock.get_installations_requests()
+    ] == ["bearer test-jwt-1", "bearer test-jwt-2", "bearer test-jwt-3"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("no_retry_delay")
+@pytest.mark.parametrize(
+    "skipped",
+    [
+        make_installation(
+            FORK_INSTALLATION_ID, account=FORK_OWNER, suspended=True
+        ),
+        make_installation(OUTSIDE_INSTALLATION_ID, account=OUTSIDE_OWNER),
+    ],
+    ids=["suspended", "outside_account"],
+)
+async def test_installation_listing_retry_does_not_authorize_skipped(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    skipped: dict[str, Any],
+) -> None:
+    """The worker skips the installations that startup skips, without
+    requesting a token for them.
+    """
+    configure_github_app(monkeypatch, repos=ALLOWLIST)
+    mock_listing_failure(github_mock, "server_error")
+    github_mock.mock_installations([skipped, make_installation()])
+    github_mock.mock_installation_token()
+    github_mock.mock_installation_repositories([make_repository()])
+    mock_reload_listing(github_mock, ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
+
+    async with LifespanManager(main.app):
+        await wait_for_reloads()
+        served = await get_served_ids()
+
+    assert github_mock.get_token_requests(skipped["id"]) == []
+    assert served == [make_message_id("broadcasts/hello.md")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("no_retry_delay")
+async def test_logs_installation_listing_retries(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    configure_github_app(monkeypatch, repos=ALLOWLIST)
+    github_mock.mock_installations_error(status_code=502, times=2)
+    github_mock.mock_installations(
+        [
+            make_installation(
+                FORK_INSTALLATION_ID, account=FORK_OWNER, suspended=True
+            ),
+            make_installation(),
+        ]
+    )
+    github_mock.mock_installation_token()
+    github_mock.mock_installation_repositories([make_repository()])
+    mock_reload_listing(github_mock, ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
+
+    async with LifespanManager(main.app):
+        await wait_for_reloads()
+
+    listing_logs = [
+        log
+        for log in get_logs(caplog)
+        if log["event"].startswith(("Retrying listing", "Listed the"))
+    ]
+    retrying = "Retrying listing the GitHub App's installations"
+    assert listing_logs == [
+        {"event": retrying, "severity": "info", "attempt": 1},
+        {"event": retrying, "severity": "info", "attempt": 2},
+        {
+            "event": "Listed the GitHub App's installations after retrying",
+            "severity": "info",
+            "attempt": 2,
+            "installation_count": 1,
+        },
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("no_retry_delay")
+async def test_warns_about_unseen_repos_after_listing_installations(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    configure_github_app(monkeypatch, repos=f"{GITHUB_REPO},{MISSPELLED_REPO}")
+    mock_listing_failure(github_mock, "server_error")
+    github_mock.mock_installations([make_installation()])
+    github_mock.mock_installation_token()
+    github_mock.mock_installation_repositories([make_repository()])
+    mock_reload_listing(github_mock, ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
+
+    async with LifespanManager(main.app):
+        await wait_for_reloads()
+
+    assert get_unseen_repo_warnings(caplog) == [
+        {
+            "event": (
+                "No GitHub App installation can see these allowed repositories"
+            ),
+            "severity": "warning",
+            "github_repos": [MISSPELLED_REPO],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("no_retry_delay")
+async def test_listing_retry_does_not_warn_about_repos_of_failed_installation(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The warning after the worker lists the installations leaves out the
+    repositories of an account whose installation is still pending, and is
+    not logged again once that installation loads.
+    """
+    configure_github_app(
+        monkeypatch, repos=f"{GITHUB_REPO},{PARTNER_REPO},{MISSPELLED_REPO}"
+    )
+    mock_listing_failure(github_mock, "server_error")
+    mock_partner_installations(github_mock)
+    github_mock.mock_installation_token()
+    github_mock.mock_installation_repositories([make_repository()])
+    mock_reload_listing(github_mock, ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
+    mock_installation_failure(
+        github_mock,
+        "token",
+        installation_id=PARTNER_INSTALLATION_ID,
+        repos=[PARTNER_REPO],
+    )
+    github_mock.mock_branch_head(SHA_A, repo=PARTNER_REPO)
+    github_mock.mock_directory("broadcasts", [], repo=PARTNER_REPO, ref=SHA_A)
+
+    async with LifespanManager(main.app):
+        await wait_for_reloads()
+
+    assert [w["github_repos"] for w in get_unseen_repo_warnings(caplog)] == [
+        [MISSPELLED_REPO]
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("no_retry_delay")
+async def test_installation_retry_does_not_warn_about_unseen_repos(
+    github_mock: GitHubMock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Only a retried listing of the installations warns about unseen
+    repositories, since the worker knows what every installation can see
+    only after listing them.
+    """
+    configure_github_app(monkeypatch, repos=f"{GITHUB_REPO},{MISSPELLED_REPO}")
+    github_mock.mock_installations([make_installation()])
+    mock_installation_failure(github_mock, "token", repos=[GITHUB_REPO])
+    mock_reload_listing(github_mock, ["hello.md"])
+    github_mock.mock_file("broadcasts/hello.md", HELLO_MD, ref=SHA_A)
+
+    async with LifespanManager(main.app):
+        await wait_for_reloads()
+
+    assert get_unseen_repo_warnings(caplog) == []
 
 
 @pytest.mark.asyncio

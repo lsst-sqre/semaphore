@@ -118,6 +118,18 @@ def configure_github_app(
     reload_config(monkeypatch)
 
 
+def _split_pages(
+    items: list[dict[str, Any]], per_page: int | None
+) -> list[list[dict[str, Any]]]:
+    """Split the items of a GitHub listing into its pages.
+
+    Each page has ``per_page`` items, or all of them if `None`. A listing
+    without items has one empty page.
+    """
+    size = per_page or max(len(items), 1)
+    return [items[i : i + size] for i in range(0, max(len(items), 1), size)]
+
+
 def get_installation_token(installation_id: int) -> str:
     """Return the access token `GitHubMock` issues to an installation."""
     return f"ghs_test-installation-{installation_id}"
@@ -422,20 +434,92 @@ class GitHubMock:
         self._httpx_mock = httpx_mock
 
     def mock_installations(
-        self, installations: Iterable[dict[str, Any]]
+        self,
+        installations: Iterable[dict[str, Any]],
+        *,
+        per_page: int | None = None,
+        failed_page: int | None = None,
     ) -> None:
-        """Mock one request for the list of installations of the app.
+        """Mock one listing of the installations of the app.
+
+        The listing is split into pages, each requested once, which are
+        linked as in `mock_installation_repositories`. Mock the listing again
+        to serve it to a later request.
 
         Parameters
         ----------
         installations
             Installation resources, such as from `make_installation`, in the
             order GitHub lists them.
+        per_page
+            Number of installations on each page, or `None` to list them all
+            on one page.
+        failed_page
+            If set, GitHub fails the request for this page, numbered from 1,
+            with a 502, and the later pages are not mocked.
         """
-        self._httpx_mock.add_response(
+        url = f"{GITHUB_API_URL}/app/installations"
+        pages = _split_pages(list(installations), per_page)
+        for number, page in enumerate(pages, start=1):
+            match_params = {"page": str(number)} if number > 1 else None
+            if number == failed_page:
+                self._httpx_mock.add_response(
+                    method="GET",
+                    url=url,
+                    match_params=match_params,
+                    status_code=502,
+                    json={"message": "GitHub error"},
+                )
+                return
+            headers = {}
+            if number < len(pages):
+                headers["Link"] = f'<{url}?page={number + 1}>; rel="next"'
+            self._httpx_mock.add_response(
+                method="GET",
+                url=url,
+                match_params=match_params,
+                headers=headers,
+                json=page,
+            )
+
+    def mock_installations_error(
+        self, *, status_code: int, times: int = 1
+    ) -> None:
+        """Mock requests for the list of installations of the app that
+        GitHub fails.
+
+        Each of the next ``times`` requests for the first page of the
+        listing fails, and each must be made. Mock the listing afterwards
+        with `mock_installations` to serve it to the request after those, as
+        when GitHub recovers.
+
+        Parameters
+        ----------
+        status_code
+            HTTP status code of GitHub's error response.
+        times
+            Number of requests that fail.
+        """
+        for _ in range(times):
+            self._httpx_mock.add_response(
+                method="GET",
+                url=f"{GITHUB_API_URL}/app/installations",
+                status_code=status_code,
+                json={"message": "GitHub error"},
+            )
+
+    def mock_installations_unreachable(self) -> None:
+        """Mock one request for the list of installations of the app that
+        cannot reach GitHub.
+
+        The next request for the first page of the listing raises
+        `httpx.ConnectError`, and it must be made. Mock the listing afterwards
+        with `mock_installations` to serve it to the request after that.
+        """
+        self._httpx_mock.add_exception(
+            httpx.ConnectError("Could not connect to GitHub"),
             method="GET",
             url=f"{GITHUB_API_URL}/app/installations",
-            json=list(installations),
         )
 
     def mock_installation_token(
@@ -526,11 +610,7 @@ class GitHubMock:
         """
         token = get_installation_token(installation_id)
         url = f"{GITHUB_API_URL}/installation/repositories"
-        size = per_page or max(len(repositories), 1)
-        pages = [
-            repositories[i : i + size]
-            for i in range(0, max(len(repositories), 1), size)
-        ]
+        pages = _split_pages(repositories, per_page)
         for number, page in enumerate(pages, start=1):
             headers = {}
             if number < len(pages):
@@ -852,6 +932,13 @@ class GitHubMock:
                 method="GET",
                 url=f"{GITHUB_API_URL}/repos/{repo}/contents/{path}",
             )
+
+    def get_installations_requests(self) -> list[httpx.Request]:
+        """Return the requests for the pages of the list of installations of
+        the app.
+        """
+        path = "/app/installations"
+        return [r for r in self.get_requests() if r.url.path == path]
 
     def get_token_requests(
         self, installation_id: int = GITHUB_INSTALLATION_ID

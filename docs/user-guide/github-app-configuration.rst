@@ -57,9 +57,14 @@ Later changes arrive through push webhooks.
   The other installations and repositories are still loaded.
   Semaphore then loads that repository, or that installation's repositories, in the background (see :ref:`github-app-reloads`).
   The broadcasts are served as soon as they load, without restarting Semaphore.
+- Likewise, if GitHub fails or can't be reached while Semaphore lists the installations of the GitHub App, Semaphore logs a ``Could not list the GitHub App's installations, will retry`` warning and still starts.
+  GitHub lists the installations a page at a time, and Semaphore keeps the broadcasts of the installations on the pages that GitHub returned before it failed.
+  If the first page failed, Semaphore starts with no broadcasts from GitHub.
+  Semaphore then lists the installations again in the background and loads each one, so the broadcasts of every installation are served once GitHub recovers.
 
 After loading, Semaphore logs a ``Loaded broadcasts from GitHub`` summary.
 Its ``failed_installation_count`` and ``failed_repo_count`` fields are the numbers of installations and repositories that are queued to be loaded in the background, and ``skipped_file_count`` is the number of skipped files.
+The summary doesn't count the installations that Semaphore couldn't list.
 
 .. _github-app-unseen-repos:
 
@@ -75,6 +80,8 @@ For each one, check that:
 - The installation isn't suspended. Semaphore logs a ``Skipping a suspended GitHub App installation`` warning for a suspended installation.
 
 The warning leaves out the repositories of an account whose installation is being retried, because Semaphore doesn't yet know which repositories that installation can see.
+If GitHub failed to list the installations of the GitHub App at startup, Semaphore doesn't log the warning at startup.
+It logs the warning, if any repository is still unseen, after it has listed the installations in the background and tried to load each of them.
 
 .. _github-app-reloads:
 
@@ -96,12 +103,16 @@ It still acknowledges the push to GitHub.
 - If GitHub no longer finds a queued repository, or the repository is no longer accepted (see :ref:`github-app-allowlist`), Semaphore drops it from the queue and logs a ``Dropping a repository that GitHub cannot find from the reload queue`` or ``Dropping a repository that may not publish broadcasts from the reload queue`` warning.
 - An installation of the GitHub App that GitHub failed to authorize, or whose repositories GitHub failed to list, at startup is retried the same way.
   Once GitHub lists the installation's repositories, Semaphore reloads each accepted repository, and queues any that fails.
+- If GitHub failed to list the installations of the GitHub App at startup, Semaphore retries the listing the same way, with a new app token for each attempt, until GitHub returns every page.
+  It then skips the installations that it skips at startup (suspended installations, and installations on an account that owns none of the repositories in :envvar:`SEMAPHORE_GITHUB_REPOS`) and loads each other installation as above, right away.
+  A repository that already loaded at startup is reloaded in full, so it serves one copy of each broadcast.
 
 Each Semaphore replica keeps its own queue and reloads on its own, so replicas may briefly serve different broadcasts while GitHub recovers.
 A replica's queue is lost when it restarts, which is harmless because the replica loads every repository again at startup.
 
 Each attempt to reload a repository logs ``Retrying loading broadcasts from a repository``, and a repository that reloads logs ``Loaded broadcasts from a repository after retrying``.
 Likewise, each attempt to load an installation's repositories logs ``Retrying loading broadcasts from a GitHub App installation``, and an installation whose repositories GitHub lists logs ``Loaded broadcasts from a GitHub App installation after retrying``.
+Each attempt to list the installations logs ``Retrying listing the GitHub App's installations``, and a listing that succeeds logs ``Listed the GitHub App's installations after retrying``, whose ``installation_count`` field is the number of installations that Semaphore then loads.
 
 Create an app with a template URL
 =================================

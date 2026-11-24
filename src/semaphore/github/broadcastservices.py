@@ -23,7 +23,12 @@ from .client import (
     create_github_installation_client,
     get_app_jwt,
 )
-from .reloadqueue import QueuedInstallation, QueuedRepo, ReloadQueue
+from .reloadqueue import (
+    QueuedInstallation,
+    QueuedInstallationListing,
+    QueuedRepo,
+    ReloadQueue,
+)
 from .repolocks import RepoLocks
 from .sourcepolicy import BroadcastSourcePolicy
 
@@ -863,20 +868,28 @@ async def bootstrap_broadcast_repo(
     GitHub app has access to.
 
     Semaphore is a GitHub App that can be installed in specific repositories.
-    An installation that is suspended, or that is on an account that owns no
+    The app's installations are listed page by page, and each page's
+    installations are loaded before the next page is requested. An
+    installation that is suspended, or that is on an account that owns no
     repository that ``source_policy`` allows, is skipped with a warning,
-    before a token is requested for it. Of the repositories that the other
-    installations can see, only those that ``source_policy`` allows are
-    loaded; the others are skipped with a warning, before any of their
-    contents are requested (see `_load_installation`).
+    before a token is requested for it (see `_get_account_to_load`). Of the
+    repositories that the other installations can see, only those that
+    ``source_policy`` allows are loaded; the others are skipped with a
+    warning, before any of their contents are requested (see
+    `_load_installation`).
 
     Neither content nor GitHub errors stop startup:
 
+    - If GitHub fails to list the installations, on the first page or a
+      later one, the failure is logged with a warning and the listing is
+      added to ``reload_queue``, so that the reload worker lists the
+      installations again and loads each one once GitHub recovers (see
+      `run_reload_worker`). The installations listed before the failure
+      keep what they loaded.
     - If GitHub fails to authorize an installation or to list its
       repositories, the installation is logged with a warning and added to
       ``reload_queue``, so that the reload worker loads its repositories
-      once GitHub recovers (see `run_reload_worker`). The other
-      installations are still loaded.
+      once GitHub recovers. The other installations are still loaded.
     - In an allowed repository (see `_load_repo_broadcasts`), a broadcast
       file that is malformed is skipped with a warning, and a repository
       without a broadcasts directory has no broadcasts. A repository that
@@ -886,9 +899,12 @@ async def bootstrap_broadcast_repo(
 
     At the end, a summary of what was loaded is logged. Then a warning lists
     the allowed repositories that no installation can see, as when a name is
-    misspelled or the app is not installed on the repository. The
-    repositories of the accounts whose installations were queued are left
-    out of it, since what those installations can see is not known yet.
+    misspelled or the app is not installed on the repository (see
+    `_warn_about_unseen_repos`). The repositories of the accounts whose
+    installations were queued are left out of it, since what those
+    installations can see is not known yet. If GitHub failed to list the
+    installations, the warning is not logged at all; the reload worker logs
+    it once it lists them.
 
     Parameters
     ----------
@@ -907,68 +923,164 @@ async def bootstrap_broadcast_repo(
     github_client = create_github_client(http_client=http_client)
     jwt = get_app_jwt()
     totals = _InstallationLoadResult()
-    failed_accounts: list[str] = []
-    async for installation in iter_installations(
-        github_client=github_client, jwt=jwt
-    ):
-        installation_id = str(installation["id"])
-        account = _get_installation_account(installation)
-        installation_logger = logger.bind(
-            installation_id=installation_id, github_account=account
-        )
-        if installation.get("suspended_at"):
-            installation_logger.warning(
-                "Skipping a suspended GitHub App installation",
-                suspended_at=installation["suspended_at"],
-            )
-            continue
-        if account is None or not source_policy.allows_owner(account):
-            installation_logger.warning(
-                "Skipping a GitHub App installation on an account that owns "
-                "no allowed repository"
-            )
-            continue
-        try:
-            result = await _load_installation(
-                installation_id=installation_id,
+    listed = True
+    try:
+        # Each page of installations is loaded before the next is requested.
+        async for installation in iter_installations(
+            github_client=github_client, jwt=jwt
+        ):
+            # This handles the installation's own errors, so what is caught
+            # here is a failure to list the installations.
+            result = await _bootstrap_installation(
+                installation,
                 http_client=http_client,
                 broadcast_repo=broadcast_repo,
                 source_policy=source_policy,
                 reload_queue=reload_queue,
-                logger=installation_logger,
+                logger=logger,
             )
-        except Exception:
-            installation_logger.warning(
-                "Could not authorize a GitHub App installation or list its "
-                "repositories, will retry",
-                exc_info=True,
-            )
-            reload_queue.add_installation(
-                installation_id=installation_id, account=account
-            )
-            failed_accounts.append(account)
-            continue
-        totals.add_installation_result(result)
+            totals.add_installation_result(result)
+    except Exception:
+        logger.warning(
+            "Could not list the GitHub App's installations, will retry",
+            exc_info=True,
+        )
+        reload_queue.add_installation_listing()
+        listed = False
 
     logger.info(
         "Loaded broadcasts from GitHub",
         github_repos=source_policy.allowed_repos,
         repo_count=totals.repo_count,
-        failed_installation_count=len(failed_accounts),
+        failed_installation_count=len(totals.failed_accounts),
         failed_repo_count=totals.failed_repo_count,
         message_count=totals.message_count,
         skipped_file_count=totals.skipped_file_count,
     )
-    unseen_repos = _get_unseen_repos(
-        source_policy=source_policy,
-        seen_repos=totals.seen_repos,
-        unknown_accounts=failed_accounts,
-    )
-    if unseen_repos:
-        logger.warning(
-            "No GitHub App installation can see these allowed repositories",
-            github_repos=unseen_repos,
+    # What the installations can see is not known until they are all listed,
+    # which the reload worker then does.
+    if listed:
+        _warn_about_unseen_repos(
+            totals, source_policy=source_policy, logger=logger
         )
+
+
+async def _bootstrap_installation(
+    installation: dict[str, Any],
+    *,
+    http_client: httpx.AsyncClient,
+    broadcast_repo: BroadcastMessageRepository,
+    source_policy: BroadcastSourcePolicy,
+    reload_queue: ReloadQueue,
+    logger: BoundLogger,
+) -> _InstallationLoadResult:
+    """Load, at startup, the broadcasts of a GitHub App installation that
+    GitHub listed, unless it must be skipped.
+
+    An installation that must be skipped (see `_get_account_to_load`) is
+    skipped with a warning. Otherwise, its repositories are loaded (see
+    `_load_installation`). If GitHub fails to authorize the installation or
+    to list its repositories, the installation is logged with a warning and
+    added to ``reload_queue``.
+
+    Parameters
+    ----------
+    installation
+        The installation resource from the GitHub v3 API.
+    http_client
+        The httpx client.
+    broadcast_repo
+        The broadcast message repository.
+    source_policy
+        The policy for which repositories may publish broadcast messages.
+    reload_queue
+        The queue of repositories and installations whose broadcasts must be
+        reloaded.
+    logger
+        The logger instance.
+
+    Returns
+    -------
+    _InstallationLoadResult
+        What was loaded from the installation's repositories. It is empty
+        for a skipped installation, and has the installation's account as a
+        failed account for a queued one.
+    """
+    account = _get_account_to_load(
+        installation, source_policy=source_policy, logger=logger
+    )
+    if account is None:
+        return _InstallationLoadResult()
+    installation_id = str(installation["id"])
+    logger = logger.bind(
+        installation_id=installation_id, github_account=account
+    )
+    try:
+        return await _load_installation(
+            installation_id=installation_id,
+            http_client=http_client,
+            broadcast_repo=broadcast_repo,
+            source_policy=source_policy,
+            reload_queue=reload_queue,
+            logger=logger,
+        )
+    except Exception:
+        logger.warning(
+            "Could not authorize a GitHub App installation or list its "
+            "repositories, will retry",
+            exc_info=True,
+        )
+        reload_queue.add_installation(
+            installation_id=installation_id, account=account
+        )
+        return _InstallationLoadResult(failed_accounts=[account])
+
+
+def _get_account_to_load(
+    installation: dict[str, Any],
+    *,
+    source_policy: BroadcastSourcePolicy,
+    logger: BoundLogger,
+) -> str | None:
+    """Get the account of a GitHub App installation whose repositories must
+    be loaded, or skip the installation with a warning.
+
+    An installation that is suspended, or that is on an account that owns no
+    repository that ``source_policy`` allows, is skipped, before a token is
+    requested for it. So is an installation without an account.
+
+    Parameters
+    ----------
+    installation
+        The installation resource from the GitHub v3 API.
+    source_policy
+        The policy for which repositories may publish broadcast messages.
+    logger
+        The logger instance.
+
+    Returns
+    -------
+    str or None
+        The login of the installation's account, or `None` if the
+        installation is skipped.
+    """
+    account = _get_installation_account(installation)
+    logger = logger.bind(
+        installation_id=str(installation["id"]), github_account=account
+    )
+    if installation.get("suspended_at"):
+        logger.warning(
+            "Skipping a suspended GitHub App installation",
+            suspended_at=installation["suspended_at"],
+        )
+        return None
+    if account is None or not source_policy.allows_owner(account):
+        logger.warning(
+            "Skipping a GitHub App installation on an account that owns no "
+            "allowed repository"
+        )
+        return None
+    return account
 
 
 def _get_installation_account(installation: dict[str, Any]) -> str | None:
@@ -990,6 +1102,38 @@ def _get_installation_account(installation: dict[str, Any]) -> str | None:
         return None
     login = account.get("login")
     return login if isinstance(login, str) else None
+
+
+def _warn_about_unseen_repos(
+    result: _InstallationLoadResult,
+    *,
+    source_policy: BroadcastSourcePolicy,
+    logger: BoundLogger,
+) -> None:
+    """Log a warning that lists the allowed repositories that no GitHub App
+    installation can see, if there are any.
+
+    Parameters
+    ----------
+    result
+        What was loaded from every installation that must be loaded. The
+        repositories of its failed accounts are left out of the warning,
+        since what their installations can see is not known.
+    source_policy
+        The policy for which repositories may publish broadcast messages.
+    logger
+        The logger instance.
+    """
+    unseen_repos = _get_unseen_repos(
+        source_policy=source_policy,
+        seen_repos=result.seen_repos,
+        unknown_accounts=result.failed_accounts,
+    )
+    if unseen_repos:
+        logger.warning(
+            "No GitHub App installation can see these allowed repositories",
+            github_repos=unseen_repos,
+        )
 
 
 def _get_unseen_repos(
@@ -1040,6 +1184,11 @@ class _InstallationLoadResult:
     allowed or not.
     """
 
+    failed_accounts: list[str] = dataclasses.field(default_factory=list)
+    """Logins of the accounts of the installations that GitHub failed to
+    authorize or to list the repositories of, which are in the reload queue.
+    """
+
     repo_count: int = 0
     """Number of allowed repositories that loaded, including those without
     broadcasts.
@@ -1072,6 +1221,7 @@ class _InstallationLoadResult:
         installation.
         """
         self.seen_repos.extend(result.seen_repos)
+        self.failed_accounts.extend(result.failed_accounts)
         self.repo_count += result.repo_count
         self.failed_repo_count += result.failed_repo_count
         self.message_count += result.message_count
@@ -1256,19 +1406,33 @@ async def run_reload_worker(
     each attempt, up to `BOOTSTRAP_RETRY_MAX_DELAY`. Once the queue is
     empty, the next entry starts the waits again from the initial delay.
 
-    Each attempt tries once each entry that was pending when it started,
-    with a new client authorized as the entry's installation:
+    Each attempt (see `_run_reload_attempt`) tries once each entry that was
+    pending when it started, and each installation that the listing of the
+    installations queues during it, with a new client authorized as the
+    entry's installation. Any exception, including an authentication error,
+    leaves the entry in the queue to be tried in the next attempt.
 
+    - The listing of the installations, which GitHub failed to return at
+      startup, is tried first. Every page of the installations is listed
+      with a new app JWT, the installations that startup skips are skipped
+      again, and each other one is added to the queue as an installation,
+      before the listing leaves the queue (see
+      `_retry_installation_listing`). Those installations are tried in the
+      same attempt. Once they have been tried, the allowed repositories that
+      none of them can see are logged with a warning, leaving out the
+      repositories of the accounts whose installations are still pending.
     - A repository is reloaded under its lock (see `_reload_queued_repo`).
       It leaves the queue once it reloads, or if GitHub no longer has it or
       ``source_policy`` no longer allows it. Otherwise it is tried again in
       the next attempt.
     - An installation, which GitHub failed to authorize or to list the
-      repositories of at startup, is authorized and its repositories are
-      listed. If that fails, it is tried again in the next attempt.
-      Otherwise, each repository that ``source_policy`` allows is reloaded
-      under its lock, and one that fails is added to the queue as a
-      repository, before the installation leaves the queue.
+      repositories of at startup, or which the listing queued, is authorized
+      and its repositories are listed. If that fails, it is tried again in
+      the next attempt. Otherwise, each repository that ``source_policy``
+      allows is reloaded in full under its lock, so that a repository that
+      already loaded at startup stores each broadcast once, and one that
+      fails is added to the queue as a repository, before the installation
+      leaves the queue.
 
     The function returns only when the task is cancelled.
 
@@ -1295,29 +1459,98 @@ async def run_reload_worker(
         while len(reload_queue) > 0:
             await asyncio.sleep(next(delays))
             attempt += 1
-            for entry in reload_queue.pending():
-                if isinstance(entry, QueuedInstallation):
-                    await _retry_installation(
-                        entry=entry,
-                        attempt=attempt,
-                        http_client=http_client,
-                        broadcast_repo=broadcast_repo,
-                        source_policy=source_policy,
-                        repo_locks=repo_locks,
-                        reload_queue=reload_queue,
-                        logger=logger,
-                    )
-                else:
-                    await _retry_repo(
-                        entry=entry,
-                        attempt=attempt,
-                        http_client=http_client,
-                        broadcast_repo=broadcast_repo,
-                        source_policy=source_policy,
-                        repo_locks=repo_locks,
-                        reload_queue=reload_queue,
-                        logger=logger,
-                    )
+            await _run_reload_attempt(
+                attempt=attempt,
+                http_client=http_client,
+                broadcast_repo=broadcast_repo,
+                source_policy=source_policy,
+                repo_locks=repo_locks,
+                reload_queue=reload_queue,
+                logger=logger,
+            )
+
+
+async def _run_reload_attempt(
+    *,
+    attempt: int,
+    http_client: httpx.AsyncClient,
+    broadcast_repo: BroadcastMessageRepository,
+    source_policy: BroadcastSourcePolicy,
+    repo_locks: RepoLocks,
+    reload_queue: ReloadQueue,
+    logger: BoundLogger,
+) -> None:
+    """Make one attempt of `run_reload_worker`.
+
+    If the listing of the installations is pending, it is tried first, so
+    that the installations it queues are tried in the same attempt. Then
+    each repository and installation that is pending is tried once. If the
+    installations were listed, the allowed repositories that none of them
+    can see are logged with a warning once they have all been tried (see
+    `_warn_about_unseen_repos`).
+
+    Parameters
+    ----------
+    attempt
+        Number of the attempt since the queue was last empty, starting at 1.
+    http_client
+        The httpx client.
+    broadcast_repo
+        The broadcast message repository.
+    source_policy
+        The policy for which repositories may publish broadcast messages.
+    repo_locks
+        The per-repository locks of broadcast sources.
+    reload_queue
+        The queue of repositories and installations whose broadcasts must be
+        reloaded.
+    logger
+        The logger instance.
+    """
+    listed = False
+    if QueuedInstallationListing() in reload_queue:
+        listed = await _retry_installation_listing(
+            attempt=attempt,
+            http_client=http_client,
+            source_policy=source_policy,
+            reload_queue=reload_queue,
+            logger=logger,
+        )
+
+    totals = _InstallationLoadResult()
+    for entry in reload_queue.pending():
+        match entry:
+            case QueuedInstallationListing():
+                # Tried above, so it is pending only if GitHub failed again.
+                pass
+            case QueuedInstallation():
+                result = await _retry_installation(
+                    entry=entry,
+                    attempt=attempt,
+                    http_client=http_client,
+                    broadcast_repo=broadcast_repo,
+                    source_policy=source_policy,
+                    repo_locks=repo_locks,
+                    reload_queue=reload_queue,
+                    logger=logger,
+                )
+                totals.add_installation_result(result)
+            case QueuedRepo():
+                await _retry_repo(
+                    entry=entry,
+                    attempt=attempt,
+                    http_client=http_client,
+                    broadcast_repo=broadcast_repo,
+                    source_policy=source_policy,
+                    repo_locks=repo_locks,
+                    reload_queue=reload_queue,
+                    logger=logger,
+                )
+
+    if listed:
+        _warn_about_unseen_repos(
+            totals, source_policy=source_policy, logger=logger
+        )
 
 
 def _iter_retry_delays() -> Iterator[float]:
@@ -1330,6 +1563,109 @@ def _iter_retry_delays() -> Iterator[float]:
         delay = min(delay * 2, BOOTSTRAP_RETRY_MAX_DELAY)
 
 
+async def _retry_installation_listing(
+    *,
+    attempt: int,
+    http_client: httpx.AsyncClient,
+    source_policy: BroadcastSourcePolicy,
+    reload_queue: ReloadQueue,
+    logger: BoundLogger,
+) -> bool:
+    """Try once to list the GitHub App's installations, which GitHub failed
+    to list at startup, and queue each installation whose repositories must
+    be loaded.
+
+    Every page of the installations is listed with a new app JWT, since the
+    one from startup expires. An installation that startup would skip (see
+    `_get_account_to_load`) is skipped with a warning, and each other one is
+    added to ``reload_queue`` as an installation. Then the listing leaves the
+    queue. If GitHub fails, on any page, nothing is queued and the listing
+    stays in the queue, to be tried again in the next attempt.
+
+    Parameters
+    ----------
+    attempt
+        Number of the attempt of `run_reload_worker` since the queue was
+        last empty, starting at 1.
+    http_client
+        The httpx client.
+    source_policy
+        The policy for which repositories may publish broadcast messages.
+    reload_queue
+        The queue of repositories and installations whose broadcasts must be
+        reloaded.
+    logger
+        The logger instance.
+
+    Returns
+    -------
+    bool
+        Whether the installations were listed.
+    """
+    logger = logger.bind(attempt=attempt)
+    logger.info("Retrying listing the GitHub App's installations")
+    try:
+        installations = await _list_installations(http_client=http_client)
+    except Exception:
+        logger.warning(
+            "Could not list the GitHub App's installations, will retry",
+            exc_info=True,
+        )
+        return False
+
+    installation_count = 0
+    for installation in installations:
+        account = _get_account_to_load(
+            installation, source_policy=source_policy, logger=logger
+        )
+        if account is None:
+            continue
+        reload_queue.add_installation(
+            installation_id=str(installation["id"]), account=account
+        )
+        installation_count += 1
+    # Removed after the installations are queued, so that the queue does not
+    # look empty in between.
+    reload_queue.discard(QueuedInstallationListing())
+    logger.info(
+        "Listed the GitHub App's installations after retrying",
+        installation_count=installation_count,
+    )
+    return True
+
+
+async def _list_installations(
+    *, http_client: httpx.AsyncClient
+) -> list[dict[str, Any]]:
+    """List, in full, the installations of the GitHub App.
+
+    Parameters
+    ----------
+    http_client
+        The httpx client.
+
+    Returns
+    -------
+    list of dict
+        The installation resources from the GitHub v3 API.
+
+    Raises
+    ------
+    Exception
+        Raised if the installations cannot be listed, as when GitHub fails or
+        cannot be reached, on any page of the listing.
+    """
+    github_client = create_github_client(http_client=http_client)
+    # A new JWT each time, since the app's JWT expires after ten minutes.
+    jwt = get_app_jwt()
+    return [
+        installation
+        async for installation in iter_installations(
+            github_client=github_client, jwt=jwt
+        )
+    ]
+
+
 async def _retry_installation(
     *,
     entry: QueuedInstallation,
@@ -1340,7 +1676,7 @@ async def _retry_installation(
     repo_locks: RepoLocks,
     reload_queue: ReloadQueue,
     logger: BoundLogger,
-) -> None:
+) -> _InstallationLoadResult:
     """Try once to load the repositories of a GitHub App installation in the
     reload queue.
 
@@ -1364,6 +1700,14 @@ async def _retry_installation(
         reloaded.
     logger
         The logger instance.
+
+    Returns
+    -------
+    _InstallationLoadResult
+        What was loaded from the installation's repositories, including the
+        repositories it can see. If GitHub failed to authorize the
+        installation or to list its repositories, so that it stays in the
+        queue, it has the installation's account as a failed account.
     """
     logger = logger.bind(
         installation_id=entry.installation_id,
@@ -1381,9 +1725,9 @@ async def _retry_installation(
             "repositories, will retry",
             exc_info=True,
         )
-        return
+        return _InstallationLoadResult(failed_accounts=[entry.account])
 
-    result = _InstallationLoadResult()
+    result = _InstallationLoadResult(seen_repos=_get_seen_repos(github_repos))
     for github_repo in _filter_allowed_repos(
         github_repos, source_policy=source_policy, logger=logger
     ):
@@ -1417,6 +1761,7 @@ async def _retry_installation(
         message_count=result.message_count,
         skipped_file_count=result.skipped_file_count,
     )
+    return result
 
 
 async def _retry_repo(

@@ -8,6 +8,7 @@ import pytest
 
 from semaphore.github.reloadqueue import (
     QueuedInstallation,
+    QueuedInstallationListing,
     QueuedRepo,
     ReloadQueue,
 )
@@ -58,6 +59,42 @@ def test_queues_installation_apart_from_its_repos() -> None:
         QueuedInstallation(installation_id="1", account="lsst-sqre"),
         QueuedRepo(installation_id="1", full_name="lsst-sqre/a"),
     ]
+
+
+def test_queues_installation_listing_once() -> None:
+    """The listing of the installations is one entry, apart from the
+    installations and repositories, and adding it while it is pending does
+    nothing.
+    """
+    queue = ReloadQueue()
+
+    queue.add_installation(installation_id="1", account="lsst-sqre")
+    queue.add_installation_listing()
+    queue.add_repo(installation_id="1", repo_full_name="lsst-sqre/a")
+    queue.add_installation_listing()
+
+    assert queue.pending() == [
+        QueuedInstallation(installation_id="1", account="lsst-sqre"),
+        QueuedInstallationListing(),
+        QueuedRepo(installation_id="1", full_name="lsst-sqre/a"),
+    ]
+
+
+def test_contains_pending_entry() -> None:
+    queue = ReloadQueue()
+    queue.add_repo(installation_id="1", repo_full_name="lsst-sqre/a")
+
+    assert QueuedRepo(installation_id="1", full_name="LSST-SQRE/A") in queue
+    assert QueuedInstallationListing() not in queue
+
+
+def test_discards_installation_listing() -> None:
+    queue = ReloadQueue()
+    queue.add_installation_listing()
+
+    queue.discard(QueuedInstallationListing())
+
+    assert len(queue) == 0
 
 
 def test_discards_repo_whatever_its_case() -> None:

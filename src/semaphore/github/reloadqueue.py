@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 __all__ = [
     "QueuedInstallation",
+    "QueuedInstallationListing",
     "QueuedReload",
     "QueuedRepo",
     "ReloadQueue",
@@ -26,9 +27,13 @@ class QueuedRepo:
 
 @dataclass(frozen=True, slots=True)
 class QueuedInstallation:
-    """A GitHub App installation that GitHub failed to authorize, or whose
-    repositories GitHub failed to list, when broadcasts were loaded at
-    startup. Its repositories' broadcasts must be loaded.
+    """A GitHub App installation whose repositories' broadcasts must be
+    loaded.
+
+    It is queued when GitHub fails to authorize it, or to list its
+    repositories, as broadcasts are loaded at startup, and when the reload
+    worker lists it after GitHub failed to list the installations at startup
+    (see `QueuedInstallationListing`).
     """
 
     installation_id: str
@@ -38,7 +43,18 @@ class QueuedInstallation:
     """Login of the user or organization that the installation is on."""
 
 
-type QueuedReload = QueuedRepo | QueuedInstallation
+@dataclass(frozen=True, slots=True)
+class QueuedInstallationListing:
+    """The listing of the GitHub App's installations, which GitHub failed to
+    return as broadcasts were loaded at startup.
+
+    The installations must be listed again, and the repositories of each
+    one loaded. There is at most one such entry, and every instance is
+    equal.
+    """
+
+
+type QueuedReload = QueuedRepo | QueuedInstallation | QueuedInstallationListing
 """An entry of the `ReloadQueue`."""
 
 
@@ -51,18 +67,21 @@ class ReloadQueue:
     nothing, so several failures for one repository cause one reload. A
     repository is identified by its installation ID and its full name
     (``owner/repo``), compared case-insensitively, as `RepoLocks` compares
-    them; an installation by its ID. Entries are kept in the order they were
-    first added.
+    them; an installation by its ID. The listing of the installations is a
+    single entry. Entries are kept in the order they were first added.
 
     The queue is held in memory by each process, so it is lost when the
     process restarts. Loading broadcasts at startup then covers it.
     """
 
     def __init__(self) -> None:
-        self._pending: dict[tuple[str, str], QueuedReload] = {}
+        self._pending: dict[tuple[str, ...], QueuedReload] = {}
         self._has_pending = asyncio.Event()
         self._is_empty = asyncio.Event()
         self._is_empty.set()
+
+    def __contains__(self, entry: QueuedReload) -> bool:
+        return self._get_key(entry) in self._pending
 
     def __len__(self) -> int:
         return len(self._pending)
@@ -100,6 +119,12 @@ class ReloadQueue:
                 installation_id=installation_id, account=account
             )
         )
+
+    def add_installation_listing(self) -> None:
+        """Add the listing of the GitHub App's installations, which must be
+        listed again, unless it is already pending.
+        """
+        self._add(QueuedInstallationListing())
 
     def discard(self, entry: QueuedReload) -> None:
         """Remove an entry, as once it has reloaded, if it is pending.
@@ -139,7 +164,11 @@ class ReloadQueue:
         self._has_pending.set()
 
     @staticmethod
-    def _get_key(entry: QueuedReload) -> tuple[str, str]:
-        if isinstance(entry, QueuedInstallation):
-            return (entry.installation_id, "")
-        return (entry.installation_id, entry.full_name.lower())
+    def _get_key(entry: QueuedReload) -> tuple[str, ...]:
+        match entry:
+            case QueuedRepo():
+                return ("repo", entry.installation_id, entry.full_name.lower())
+            case QueuedInstallation():
+                return ("installation", entry.installation_id)
+            case QueuedInstallationListing():
+                return ("installation_listing",)
