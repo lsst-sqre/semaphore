@@ -1,10 +1,12 @@
 """Tests for the semaphore v1 API."""
 
+import inspect
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import ANY
 
 import pytest
+from fastapi.routing import APIRoute
 from httpx import AsyncClient, Response
 from safir.database import create_async_session, datetime_to_db
 from safir.http import PaginationLinkData
@@ -13,6 +15,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from semaphore.dependencies.broadcastrepo import broadcast_repo_dependency
+from semaphore.handlers.v1 import v1_router
 from semaphore.schema import UserNotification as SQLUserNotification
 
 from ..support.broadcasts import create_active_message, create_disabled_message
@@ -57,6 +60,25 @@ async def test_get_broadcasts(client: AsyncClient) -> None:
 
     data = await get_broadcasts(client)
     assert len(data) == 1
+
+
+def test_get_broadcasts_handler_is_async() -> None:
+    """Test that ``GET /semaphore/v1/broadcasts`` runs on the event loop.
+
+    FastAPI runs a sync handler in a worker thread, where iterating the
+    broadcast repository while the event loop adds or removes messages raises
+    `RuntimeError`. An async handler without an ``await`` reads the whole
+    repository before any other task can change it.
+    """
+    routes = [
+        r
+        for r in v1_router.routes
+        if isinstance(r, APIRoute)
+        and r.path == "/broadcasts"
+        and r.methods == {"GET"}
+    ]
+    assert len(routes) == 1
+    assert inspect.iscoroutinefunction(routes[0].endpoint)
 
 
 @pytest.mark.asyncio
