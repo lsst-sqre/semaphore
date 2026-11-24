@@ -98,18 +98,18 @@ async def post_github_webhook(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
         )
 
+    # Event.from_http compares the signature with hmac.compare_digest, which
+    # raises TypeError for a string with a character that isn't ASCII.
+    # Starlette decodes headers as latin-1, so a request can send one, but a
+    # signature that GitHub sends is always ASCII.
+    if not _are_signatures_ascii(request):
+        return _reject_invalid_signature(logger, "signature is not ASCII")
+
     webhook_secret = config.github_webhook_secret.get_secret_value()
     try:
         event = Event.from_http(request.headers, body, secret=webhook_secret)
     except ValidationFailure as e:
-        logger.warning(
-            "Rejected a GitHub webhook without a valid signature",
-            reason=str(e),
-        )
-        return Response(
-            "The webhook signature is missing or invalid",
-            status_code=status.HTTP_401_UNAUTHORIZED,
-        )
+        return _reject_invalid_signature(logger, str(e))
     except BadRequest as e:
         # Event.from_http raises this if it can't decode the body, such as
         # for an unsupported content type.
@@ -155,3 +155,31 @@ async def post_github_webhook(
         logger=logger,
     )
     return Response(status_code=status.HTTP_202_ACCEPTED)
+
+
+def _are_signatures_ascii(request: Request) -> bool:
+    """Check whether every signature header of a GitHub webhook request is
+    ASCII.
+
+    ``Event.from_http`` validates the ``X-Hub-Signature-256`` header, or the
+    deprecated ``X-Hub-Signature`` header if the request has no
+    ``X-Hub-Signature-256`` header, so both are checked.
+    """
+    return all(
+        value.isascii()
+        for name in ("X-Hub-Signature-256", "X-Hub-Signature")
+        for value in request.headers.getlist(name)
+    )
+
+
+def _reject_invalid_signature(logger: BoundLogger, reason: str) -> Response:
+    """Log and return the response to a GitHub webhook request whose
+    signature is missing or invalid.
+    """
+    logger.warning(
+        "Rejected a GitHub webhook without a valid signature", reason=reason
+    )
+    return Response(
+        "The webhook signature is missing or invalid",
+        status_code=status.HTTP_401_UNAUTHORIZED,
+    )

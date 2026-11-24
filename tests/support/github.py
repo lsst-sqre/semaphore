@@ -329,7 +329,8 @@ async def post_github_webhook_body(
     event: str,
     body: bytes,
     *,
-    signature: str | None,
+    signature: str | bytes | None,
+    signature_header: str = "X-Hub-Signature-256",
     content_type: str = "application/json",
 ) -> httpx.Response:
     """Post a webhook request with a given body and signature to Semaphore.
@@ -346,9 +347,13 @@ async def post_github_webhook_body(
     body
         Body of the request.
     signature
-        Value of the ``X-Hub-Signature-256`` header, or `None` to send no
-        signature. `sign_webhook_body` returns the signature that GitHub
-        would send.
+        Value of the signature header, or `None` to send no signature.
+        `sign_webhook_body` returns the signature that GitHub would send.
+        Pass `bytes` to send a value that isn't ASCII, which httpx rejects as
+        a `str`.
+    signature_header
+        Name of the signature header. GitHub also sends the deprecated SHA-1
+        signature as ``X-Hub-Signature``.
     content_type
         Value of the ``Content-Type`` header.
 
@@ -358,12 +363,14 @@ async def post_github_webhook_body(
         Semaphore's response.
     """
     headers = {
-        "Content-Type": content_type,
-        "X-GitHub-Event": event,
-        "X-GitHub-Delivery": str(uuid4()),
+        b"Content-Type": content_type.encode(),
+        b"X-GitHub-Event": event.encode(),
+        b"X-GitHub-Delivery": str(uuid4()).encode(),
     }
     if signature is not None:
-        headers["X-Hub-Signature-256"] = signature
+        if isinstance(signature, str):
+            signature = signature.encode()
+        headers[signature_header.encode()] = signature
     return await client.post(
         "/semaphore/github/webhook", content=body, headers=headers
     )

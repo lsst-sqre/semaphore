@@ -1396,6 +1396,45 @@ async def test_webhook_with_wrong_signature(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("header", "signature"),
+    [
+        ("X-Hub-Signature-256", b"sha256=\xe9"),
+        ("X-Hub-Signature", b"sha1=\xe9"),
+    ],
+    ids=["sha256", "sha1"],
+)
+async def test_webhook_with_non_ascii_signature(
+    github_app_client: AsyncClient,
+    github_mock: GitHubMock,
+    caplog: pytest.LogCaptureFixture,
+    header: str,
+    signature: bytes,
+) -> None:
+    """A signature that isn't ASCII is rejected as a wrong signature, rather
+    than raising an exception when it's compared with the right one.
+    """
+    body = json.dumps(make_push_payload(added=["broadcasts/hello.md"]))
+
+    response = await post_github_webhook_body(
+        github_app_client,
+        "push",
+        body.encode(),
+        signature=signature,
+        signature_header=header,
+    )
+
+    assert response.status_code == 401
+    assert response.text == "The webhook signature is missing or invalid"
+    assert await get_broadcasts(github_app_client) == []
+    assert github_mock.get_requests() == []
+    warnings = get_warnings(caplog)
+    assert [w["event"] for w in warnings] == [
+        "Rejected a GitHub webhook without a valid signature"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_webhook_with_unsupported_content_type(
     github_app_client: AsyncClient,
     github_mock: GitHubMock,
